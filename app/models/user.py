@@ -11,7 +11,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import uuid
 
-from app.db import Base
+from db import Base
 
 class UserRole(str, Enum):
     USER="user"
@@ -23,7 +23,7 @@ class User(Base):
     id=Column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid64
+        default=uuid.uuid4
     )
 
     email = Column(
@@ -38,11 +38,11 @@ class User(Base):
         nullable=False,
     )
 
-    role=Column(
-        SqlEnum(UserRole, name="user-role"),
+    role = Column(
+        SqlEnum(UserRole, name="user_role"),
         nullable=False,
-        default=UserRole.USER
-    )
+        default=UserRole.USER,
+)
 
     created_at=Column(
         DateTime(timezone=True),
@@ -51,7 +51,7 @@ class User(Base):
     )
 
 #Relationships
-    subscription = relationship(
+    subscriptions = relationship(
         "Subscription",
         back_populates="user",
         cascade="all, delete-orphan"

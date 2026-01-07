@@ -12,7 +12,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import uuid
 
-from app.db import Base
+from db import Base
 
 class BillingPeriod(str, Enum):
     MONTH="month"
@@ -24,7 +24,7 @@ class Plan(Base):
     id=Column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid64
+        default=uuid.uuid4
     )
 
     name=Column(

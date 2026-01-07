@@ -11,7 +11,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
-from app.db import Base
+from db import Base
 
 class SubscriptionStatus(str, Enum):
     TRIAL = "trial"
@@ -26,12 +26,12 @@ class Subscription(Base):
     id=Column(
         UUID(as_uuid=True),
         primary_key=True,
-        default=uuid.uuid64
+        default=uuid.uuid4
     )
 
     user_id = Column (
         UUID(as_uuid=True),
-        ForeignKey("user.id", ondelete="CASCADE"),
+        ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True
     )
