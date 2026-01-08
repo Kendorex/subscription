@@ -1,10 +1,11 @@
 from __future__ import annotations
 from pydantic import Field
+from uuid import UUID
 from .common import APIModel
 
 class PaymentMethodOut(APIModel):
-    id: int
-    user_id: str
+    id: UUID
+    user_id: UUID
     provider: str
     token_ref: str
     is_default: bool

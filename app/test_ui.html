@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>Subscription UI (mini-cabinet)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+
+  <body>
+    <h2>Subscription UI (мини-кабинет, без CSS)</h2>
+
+    <section>
+      <p>
+        <b>Base URL:</b>
+        <input id="baseUrl" type="text" value="http://127.0.0.1:8000" size="40" />
+        <button id="btnPing">Ping (GET /plans)</button>
+      </p>
+    </section>
+
+    <hr />
+
+    <section>
+      <h3>1) Пользователь</h3>
+
+      <p>
+        <b>Выбрать:</b>
+        <button class="btnUser" data-email="alice@example.com">alice</button>
+        <button class="btnUser" data-email="bob@example.com">bob</button>
+        <button class="btnUser" data-email="admin@example.com">admin</button>
+      </p>
+
+      <p>
+        <b>Или свой email:</b>
+        <input id="customEmail" type="text" placeholder="например ivan@example.com" size="30" />
+        <button id="btnUseCustom">Использовать</button>
+        <button id="btnDevRegisterAndUseCustom">DEV: Register + Use</button>
+      </p>
+
+      <p>
+        <b>Текущий email (X-User-Email):</b>
+        <span id="activeEmail"></span>
+      </p>
+
+      <p>
+        <b>Admin email (для /admin/*):</b>
+        <input id="adminEmail" type="text" value="admin@example.com" size="30" />
+        <button id="btnUseAdminEmail">Использовать</button>
+        <span id="activeAdmin"></span>
+      </p>
+
+      <details>
+        <summary><b>DEV: регистрация пользователя в БД (чтобы не было "Unknown user")</b></summary>
+        <p>
+          role
+          <select id="devRole">
+            <option value="user">user</option>
+            <option value="admin">admin</option>
+          </select>
+
+          password (optional)
+          <input id="devPassword" placeholder="любая строка (dev)" size="25" />
+
+          <button id="btnDevRegister">DEV: Register current email</button>
+          <button id="btnDevWhoami">DEV: WhoAmI current email</button>
+        </p>
+        <p>
+          <small>
+            Использует /dev/register и /dev/whoami. Пароль — только чтобы заполнить NOT NULL password_hash в твоей модели.
+          </small>
+        </p>
+      </details>
+
+      <p>
+        <button id="btnRefreshAll">Обновить всё (планы + методы оплаты + мои подписки)</button>
+      </p>
+    </section>
+
+    <hr />
+
+    <section>
+      <h3>2) Планы</h3>
+      <p>
+        <button id="btnLoadPlans">Загрузить планы (GET /plans)</button>
+      </p>
+
+      <div>
+        <b>Доступные планы:</b>
+        <div id="plansBox"></div>
+      </div>
+
+      <p>
+        <b>Выбранный plan_id:</b>
+        <input id="selectedPlanId" size="50" placeholder="кликни по плану или вставь сюда" />
+      </p>
+
+      <details>
+        <summary><b>Admin: создать план</b></summary>
+        <p>
+          name <input id="planName" value="Team" />
+          price_cents <input id="planPrice" value="199900" />
+          period
+          <select id="planPeriod">
+            <option value="month">month</option>
+            <option value="year">year</option>
+          </select>
+          trial_days <input id="planTrial" value="7" />
+          <button id="btnCreatePlan">POST /admin/plans</button>
+        </p>
+      </details>
+    </section>
+
+    <hr />
+
+    <section>
+      <h3>3) Методы оплаты (для текущего пользователя)</h3>
+      <p>
+        <button id="btnLoadPM">Загрузить (GET /payment-methods)</button>
+      </p>
+
+      <div>
+        <b>Список методов оплаты:</b>
+        <div id="pmBox"></div>
+      </div>
+
+      <details>
+        <summary><b>Добавить метод оплаты</b></summary>
+        <p>
+          provider <input id="pmProvider" value="fake" />
+          token_ref <input id="pmToken" value="tok_test_001" size="30" />
+          is_default
+          <select id="pmDefault">
+            <option value="true">true</option>
+            <option value="false">false</option>
+          </select>
+          <button id="btnPMAdd">POST /payment-methods</button>
+        </p>
+      </details>
+
+      <p>
+        <b>Сделать default:</b>
+        pm_id <input id="pmIdDefault" placeholder="например 1" />
+        <button id="btnPMMakeDefault">POST /payment-methods/{id}/make-default</button>
+      </p>
+    </section>
+
+    <hr />
+
+    <section>
+      <h3>4) Моя подписка</h3>
+
+      <p>
+        <button id="btnLoadSubs">Загрузить (GET /subscriptions/me)</button>
+      </p>
+
+      <div>
+        <b>Текущие подписки:</b>
+        <div id="subsBox"></div>
+      </div>
+
+      <p>
+        <button id="btnSubscribe">Оформить подписку (POST /subscriptions)</button>
+        <button id="btnExplainRenewal">Показать, как будет продлена (по данным из API)</button>
+      </p>
+
+      <p>
+        <b>Отменить:</b>
+        sub_id <input id="subCancelId" placeholder="вставь id подписки" size="40" />
+        <button id="btnCancelSub">POST /subscriptions/{id}/cancel</button>
+      </p>
+    </section>
+
+    <hr />
+
+    <section>
+      <h3>5) Admin: симуляция автопродления</h3>
+      <p>
+        limit <input id="adminLimit" value="50" />
+        <button id="btnRunBilling">POST /admin/billing/run-due</button>
+        <button id="btnSendNotif">POST /admin/notifications/send-due</button>
+      </p>
+      <p>
+        <button id="btnSimulateRenewalFlow">
+          Симулировать “автопродление”: run-due → обновить мои подписки
+        </button>
+      </p>
+    </section>
+
+    <hr />
+
+    <section>
+      <h3>6) Вывод (лог)</h3>
+      <pre id="out" style="white-space: pre-wrap; border: 1px solid #ccc; padding: 8px;"></pre>
+    </section>
+
+    <script>
+      // ---------------- state ----------------
+      let currentEmail = "alice@example.com";
+      let currentAdmin = "admin@example.com";
+
+      // cache
+      let cachedPlans = [];
+      let cachedPM = [];
+      let cachedSubs = [];
+
+      const el = (id) => document.getElementById(id);
+      const out = el("out");
+
+      function baseUrl() {
+        return el("baseUrl").value.trim().replace(/\/+$/, "");
+      }
+
+      function log(msg) {
+        out.textContent = String(msg) + "\n" + out.textContent;
+      }
+
+      function pretty(obj) {
+        try {
+          return JSON.stringify(obj, null, 2);
+        } catch {
+          return String(obj);
+        }
+      }
+
+      function setActiveLabels() {
+        el("activeEmail").textContent = currentEmail;
+        el("activeAdmin").textContent = ` => ${currentAdmin}`;
+      }
+
+      setActiveLabels();
+
+      function normalizeEmail(v) {
+        return String(v || "").trim().toLowerCase();
+      }
+
+      // ---------------- request ----------------
+      async function request(method, path, { asAdmin = false, body = null, headersExtra = null } = {}) {
+        const url = baseUrl() + path;
+
+        const headers = {
+          "Content-Type": "application/json",
+          "X-User-Email": asAdmin ? currentAdmin : currentEmail,
+        };
+        if (headersExtra && typeof headersExtra === "object") {
+          Object.assign(headers, headersExtra);
+        }
+
+        const opts = { method, headers };
+        if (body !== null) opts.body = JSON.stringify(body);
+
+        log(`→ ${method} ${url}`);
+        log(`  X-User-Email: ${headers["X-User-Email"]}`);
+
+        const res = await fetch(url, opts);
+        const text = await res.text();
+
+        let data;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch {
+          data = text;
+        }
+
+        log(`← status ${res.status}`);
+        log(pretty(data));
+        log("--------------------------------------------------");
+        return { status: res.status, data };
+      }
+
+      async function requestRaw(method, url, { body = null } = {}) {
+        const opts = { method, headers: { "Content-Type": "application/json" } };
+        if (body !== null) opts.body = JSON.stringify(body);
+
+        log(`→ ${method} ${url}`);
+        const res = await fetch(url, opts);
+        const text = await res.text();
+
+        let data;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch {
+          data = text;
+        }
+
+        log(`← status ${res.status}`);
+        log(pretty(data));
+        log("--------------------------------------------------");
+        return { status: res.status, data };
+      }
+
+      // ---------------- DEV helpers ----------------
+      async function devRegister(email, role, password) {
+        const payload = {
+          email: normalizeEmail(email),
+          role: role || "user",
+        };
+        if (password && String(password).trim()) payload.password = String(password).trim();
+
+        return await requestRaw("POST", baseUrl() + "/dev/register", { body: payload });
+      }
+
+      async function devWhoami(email) {
+        const e = encodeURIComponent(normalizeEmail(email));
+        return await requestRaw("GET", baseUrl() + `/dev/whoami?email=${e}`);
+      }
+
+      // ---------------- render helpers ----------------
+      function clearBox(node) {
+        node.innerHTML = "";
+      }
+
+      function renderPlans(plans) {
+        const box = el("plansBox");
+        clearBox(box);
+
+        if (!plans || !plans.length) {
+          box.textContent = "(нет планов)";
+          return;
+        }
+
+        const ul = document.createElement("ul");
+        plans.forEach((p) => {
+          const li = document.createElement("li");
+
+          const id = p.id ?? p.plan_id ?? p.uuid ?? p.code ?? "(no-id)";
+          const name = p.name ?? "(no-name)";
+          const price = p.price_cents ?? p.price ?? p.amount_cents ?? "(?)";
+          const period = p.period ?? p.interval ?? "(?)";
+          const trial = p.trial_days ?? p.trial ?? 0;
+
+          const btn = document.createElement("button");
+          btn.textContent = `Выбрать plan_id = ${id}`;
+          btn.addEventListener("click", () => {
+            el("selectedPlanId").value = String(id);
+            log(`OK: selected plan_id = ${id}`);
+          });
+
+          const span = document.createElement("span");
+          span.textContent = ` ${name} | ${price} cents | ${period} | trial ${trial} days`;
+
+          li.appendChild(btn);
+          li.appendChild(span);
+          ul.appendChild(li);
+        });
+
+        box.appendChild(ul);
+      }
+
+      function renderPM(pms) {
+        const box = el("pmBox");
+        clearBox(box);
+
+        if (!pms || !pms.length) {
+          box.textContent = "(нет методов оплаты)";
+          return;
+        }
+
+        const ul = document.createElement("ul");
+        pms.forEach((pm) => {
+          const li = document.createElement("li");
+          const id = pm.id ?? pm.pm_id ?? "(no-id)";
+          const provider = pm.provider ?? "(?)";
+          const token = pm.token_ref ?? pm.token ?? "(?)";
+          const isDefault = pm.is_default ?? pm.default ?? false;
+
+          const btn = document.createElement("button");
+          btn.textContent = `Вставить pm_id=${id}`;
+          btn.addEventListener("click", () => {
+            el("pmIdDefault").value = String(id);
+            log(`OK: selected pm_id = ${id}`);
+          });
+
+          const span = document.createElement("span");
+          span.textContent = ` provider=${provider} token=${token} default=${isDefault}`;
+
+          li.appendChild(btn);
+          li.appendChild(span);
+          ul.appendChild(li);
+        });
+
+        box.appendChild(ul);
+      }
+
+      function fmtDateMaybe(v) {
+        if (!v) return null;
+        if (typeof v === "string") return v;
+        if (typeof v === "number") {
+          const ms = v > 1e12 ? v : v * 1000;
+          return new Date(ms).toISOString();
+        }
+        return String(v);
+      }
+
+      function renderSubs(subs) {
+        const box = el("subsBox");
+        clearBox(box);
+
+        if (!subs || !subs.length) {
+          box.textContent = "(нет подписок)";
+          return;
+        }
+
+        const ul = document.createElement("ul");
+        subs.forEach((s) => {
+          const li = document.createElement("li");
+
+          const id = s.id ?? s.sub_id ?? s.uuid ?? "(no-id)";
+          const status = s.status ?? s.state ?? "(?)";
+          const planId = s.plan_id ?? s.planId ?? s.plan?.id ?? "(?)";
+
+          const currentPeriodEnd =
+            fmtDateMaybe(s.current_period_end ?? s.period_end ?? s.currentPeriodEnd);
+          const nextBillingAt =
+            fmtDateMaybe(s.next_billing_at ?? s.nextBillingAt ?? s.renew_at ?? s.next_charge_at);
+          const autoRenew =
+            s.auto_renew ??
+            s.autoRenew ??
+            (s.cancel_at_period_end !== undefined ? !s.cancel_at_period_end : null);
+
+          const btn = document.createElement("button");
+          btn.textContent = `Вставить sub_id=${id}`;
+          btn.addEventListener("click", () => {
+            el("subCancelId").value = String(id);
+            log(`OK: selected sub_id = ${id}`);
+          });
+
+          const span = document.createElement("span");
+          span.textContent =
+            ` status=${status} plan_id=${planId}` +
+            (autoRenew === null ? "" : ` auto_renew=${autoRenew}`) +
+            (currentPeriodEnd ? ` current_period_end=${currentPeriodEnd}` : "") +
+            (nextBillingAt ? ` next_billing_at=${nextBillingAt}` : "");
+
+          li.appendChild(btn);
+          li.appendChild(span);
+          ul.appendChild(li);
+        });
+
+        box.appendChild(ul);
+      }
+
+      // ---------------- data loaders ----------------
+      async function loadPlans() {
+        const r = await request("GET", "/plans");
+        if (r.status >= 200 && r.status < 300) {
+          cachedPlans = Array.isArray(r.data) ? r.data : (r.data?.items ?? []);
+          renderPlans(cachedPlans);
+        }
+      }
+
+      async function loadPM() {
+        const r = await request("GET", "/payment-methods");
+        if (r.status >= 200 && r.status < 300) {
+          cachedPM = Array.isArray(r.data) ? r.data : (r.data?.items ?? []);
+          renderPM(cachedPM);
+        }
+      }
+
+      async function loadSubs() {
+        const r = await request("GET", "/subscriptions/me");
+        if (r.status >= 200 && r.status < 300) {
+          cachedSubs = Array.isArray(r.data) ? r.data : (r.data?.items ?? []);
+          renderSubs(cachedSubs);
+        }
+      }
+
+      async function refreshAll() {
+        await loadPlans();
+        await loadPM();
+        await loadSubs();
+      }
+
+      // ---------------- user controls ----------------
+      document.querySelectorAll(".btnUser").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          currentEmail = normalizeEmail(btn.dataset.email);
+          setActiveLabels();
+          log(`OK: current user email = ${currentEmail}`);
+        });
+      });
+
+      el("btnUseCustom").addEventListener("click", () => {
+        const v = normalizeEmail(el("customEmail").value);
+        if (!v) return log("Введите email");
+        currentEmail = v;
+        setActiveLabels();
+        log(`OK: current user email = ${currentEmail}`);
+      });
+
+      el("btnUseAdminEmail").addEventListener("click", () => {
+        const v = normalizeEmail(el("adminEmail").value);
+        if (!v) return log("Введите admin email");
+        currentAdmin = v;
+        setActiveLabels();
+        log(`OK: current admin email = ${currentAdmin}`);
+      });
+
+      // ---------------- DEV buttons ----------------
+      el("btnDevRegister").addEventListener("click", async () => {
+        const role = el("devRole").value;
+        const password = el("devPassword").value;
+        const r = await devRegister(currentEmail, role, password);
+        if (r.status >= 200 && r.status < 300) {
+          log(`DEV OK: зарегистрирован/уже существует: ${normalizeEmail(currentEmail)}`);
+        }
+      });
+
+      el("btnDevWhoami").addEventListener("click", async () => {
+        const r = await devWhoami(currentEmail);
+        if (r.status === 404) log("DEV: пользователя нет в БД (сделай /dev/register)");
+      });
+
+      el("btnDevRegisterAndUseCustom").addEventListener("click", async () => {
+        const v = normalizeEmail(el("customEmail").value);
+        if (!v) return log("Введите email в поле 'свой email'");
+        const role = el("devRole").value;
+        const password = el("devPassword").value;
+
+        const r = await devRegister(v, role, password);
+        if (r.status >= 200 && r.status < 300) {
+          currentEmail = v;
+          setActiveLabels();
+          log(`DEV OK: register+use => ${currentEmail}`);
+        }
+      });
+
+      // ---------------- buttons ----------------
+      el("btnPing").addEventListener("click", async () => {
+        await request("GET", "/plans");
+      });
+
+      el("btnRefreshAll").addEventListener("click", async () => {
+        await refreshAll();
+      });
+
+      el("btnLoadPlans").addEventListener("click", async () => {
+        await loadPlans();
+      });
+
+      el("btnCreatePlan").addEventListener("click", async () => {
+        const payload = {
+          name: el("planName").value.trim(),
+          price_cents: Number(el("planPrice").value),
+          period: el("planPeriod").value,
+          trial_days: Number(el("planTrial").value),
+        };
+        await request("POST", "/admin/plans", { asAdmin: true, body: payload });
+        await loadPlans();
+      });
+
+      el("btnLoadPM").addEventListener("click", async () => {
+        await loadPM();
+      });
+
+      el("btnPMAdd").addEventListener("click", async () => {
+        const payload = {
+          provider: el("pmProvider").value.trim(),
+          token_ref: el("pmToken").value.trim(),
+          is_default: el("pmDefault").value === "true",
+        };
+        await request("POST", "/payment-methods", { body: payload });
+        await loadPM();
+      });
+
+      el("btnPMMakeDefault").addEventListener("click", async () => {
+        const pmId = el("pmIdDefault").value.trim();
+        if (!pmId) return log("Введите pm_id");
+        await request("POST", `/payment-methods/${encodeURIComponent(pmId)}/make-default`);
+        await loadPM();
+      });
+
+      el("btnLoadSubs").addEventListener("click", async () => {
+        await loadSubs();
+      });
+
+      el("btnSubscribe").addEventListener("click", async () => {
+        const planId = el("selectedPlanId").value.trim();
+        if (!planId) return log("Выбери plan_id");
+        await request("POST", "/subscriptions", { body: { plan_id: planId } });
+        await loadSubs();
+      });
+
+      el("btnCancelSub").addEventListener("click", async () => {
+        const subId = el("subCancelId").value.trim();
+        if (!subId) return log("Введите sub_id");
+        await request("POST", `/subscriptions/${encodeURIComponent(subId)}/cancel`);
+        await loadSubs();
+      });
+
+      el("btnExplainRenewal").addEventListener("click", () => {
+        if (!cachedSubs || !cachedSubs.length) {
+          log("Нет подписок в кеше. Нажми 'Загрузить подписки'.");
+          return;
+        }
+
+        const active =
+          cachedSubs.find((s) => String(s.status ?? s.state ?? "").toLowerCase().includes("active")) ??
+          cachedSubs[0];
+
+        const status = active.status ?? active.state ?? "(?)";
+        const currentPeriodEnd = fmtDateMaybe(active.current_period_end ?? active.period_end ?? active.currentPeriodEnd);
+        const nextBillingAt = fmtDateMaybe(active.next_billing_at ?? active.nextBillingAt ?? active.renew_at ?? active.next_charge_at);
+
+        const cancelAtPeriodEnd =
+          active.cancel_at_period_end ?? active.cancelAtPeriodEnd ?? null;
+
+        const autoRenew =
+          active.auto_renew ??
+          active.autoRenew ??
+          (cancelAtPeriodEnd !== null ? !cancelAtPeriodEnd : null);
+
+        log("=== Как будет продлена подписка (по данным API) ===");
+        log(`status: ${status}`);
+        if (autoRenew === null) log("auto_renew: (нет поля в ответе)");
+        else log(`auto_renew: ${autoRenew}`);
+
+        if (currentPeriodEnd) log(`current_period_end: ${currentPeriodEnd}`);
+        else log("current_period_end: (нет поля в ответе)");
+
+        if (nextBillingAt) log(`next_billing_at: ${nextBillingAt}`);
+        else log("next_billing_at: (нет поля в ответе)");
+
+        if (autoRenew === false) {
+          log("Итог: автопродления не будет (подписка должна закончиться в конце периода).");
+        } else if (autoRenew === true) {
+          log("Итог: при наступлении next_billing_at система попытается списать и продлить период.");
+        } else {
+          log("Итог: не могу точно сказать — добавь в ответ API поля auto_renew/cancel_at_period_end/next_billing_at.");
+        }
+        log("==================================================");
+      });
+
+      el("btnRunBilling").addEventListener("click", async () => {
+        const limit = Number(el("adminLimit").value || "50");
+        await request("POST", `/admin/billing/run-due?limit=${encodeURIComponent(limit)}`, { asAdmin: true });
+      });
+
+      el("btnSendNotif").addEventListener("click", async () => {
+        const limit = Number(el("adminLimit").value || "50");
+        await request("POST", `/admin/notifications/send-due?limit=${encodeURIComponent(limit)}`, { asAdmin: true });
+      });
+
+      el("btnSimulateRenewalFlow").addEventListener("click", async () => {
+        const limit = Number(el("adminLimit").value || "50");
+        log("Сценарий: admin run-due → refresh my subs");
+        await request("POST", `/admin/billing/run-due?limit=${encodeURIComponent(limit)}`, { asAdmin: true });
+        await loadSubs();
+        log("Готово: обновил мои подписки после run-due.");
+      });
+
+      // ---- initial hint
+      log("Подсказка (быстрый сценарий):");
+      log("1) Если хочешь свой email: введи email → DEV: Register + Use");
+      log("2) 'Добавить метод оплаты' (если нет)");
+      log("3) 'Загрузить планы' → выбрать plan_id");
+      log("4) 'Оформить подписку'");
+      log("5) 'Показать, как будет продлена'");
+      log("6) Под admin: 'Симулировать автопродление'");
+      log("Важно: для кастомного email нужен /dev/register, иначе будет Unknown user.");
+      log("--------------------------------------------------");
+    </script>
+  </body>
+</html>
