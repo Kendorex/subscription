@@ -14,7 +14,7 @@ from models.notification import (
     NotificationStatus,
 )
 
-# Ретрай-делеи (если канал временно недоступен)
+# ----- настройки ретраев (если канал временно недоступен)
 RETRY_DELAYS = [
     timedelta(minutes=1),
     timedelta(minutes=5),
@@ -22,6 +22,9 @@ RETRY_DELAYS = [
     timedelta(hours=1),
     timedelta(hours=6),
 ]
+
+# ----- анти-спам окно для PAYMENT_FAIL (не слать чаще, чем раз в N минут)
+FAIL_THROTTLE_WINDOW = timedelta(minutes=10)
 
 
 class NotificationError(Exception):
@@ -62,11 +65,12 @@ class SendResult:
 class NotificationService:
     """
     Под твою модель Notification:
-    - enqueue(): создаёт уведомление (можно с дедупликацией по (user_id,type,channel,payload,status=PENDING))
+    - enqueue(): создаёт уведомление
     - send_due(): отправляет одно уведомление, если оно due (PENDING и scheduled_at <= now)
     - send_due_batch(): отправляет пачку due уведомлений
 
     Ретраи: статус остаётся PENDING, scheduled_at переносится в будущее.
+    Анти-спам: PAYMENT_FAIL не отправляем чаще, чем FAIL_THROTTLE_WINDOW.
     """
 
     # -------------------- enqueue --------------------
@@ -81,17 +85,36 @@ class NotificationService:
         payload: str | None = None,
         scheduled_at: datetime | None = None,
         dedupe: bool = True,
+        throttle: bool = True,
     ) -> EnqueueResult:
         """
-        dedupe=True: чтобы не плодить одинаковые уведомления при повторных вызовах.
-        Дедупликация делается по существующему PENDING уведомлению с теми же полями.
+        dedupe=True:
+          - не плодить одинаковые PENDING уведомления по (user_id,type,channel,payload,status=PENDING)
+
+        throttle=True:
+          - для PAYMENT_FAIL: если недавно уже было отправлено (SENT) такое уведомление, новое не создаём
         """
         if scheduled_at is not None and scheduled_at.tzinfo is None:
-            # приводим к aware UTC на всякий
             scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
 
+        # ---- анти-спам для PAYMENT_FAIL (проверяем недавние SENT)
+        if throttle and type == NotificationType.PAYMENT_FAIL:
+            since = now_utc() - FAIL_THROTTLE_WINDOW
+            recent_sent = db.execute(
+                select(Notification).where(
+                    Notification.user_id == user_id,
+                    Notification.type == type,
+                    Notification.channel == channel,
+                    Notification.sent_at.is_not(None),
+                    Notification.sent_at >= since,
+                )
+            ).scalar_one_or_none()
+            if recent_sent:
+                return EnqueueResult(notification_id=recent_sent.id, status=recent_sent.status)
+
+        # ---- дедупликация по существующему PENDING (чтобы ретраи воркера не плодили дубли)
         if dedupe:
-            existing = db.execute(
+            existing_pending = db.execute(
                 select(Notification).where(
                     Notification.user_id == user_id,
                     Notification.type == type,
@@ -100,13 +123,16 @@ class NotificationService:
                     Notification.payload == payload,
                 )
             ).scalar_one_or_none()
-            if existing:
-                # если у нового есть scheduled_at, можно "подтянуть" на более раннее время
-                if scheduled_at and (existing.scheduled_at is None or scheduled_at < existing.scheduled_at):
-                    existing.scheduled_at = scheduled_at
+            if existing_pending:
+                # если новое scheduled_at раньше — подтянем его
+                if scheduled_at and (
+                    existing_pending.scheduled_at is None or scheduled_at < existing_pending.scheduled_at
+                ):
+                    existing_pending.scheduled_at = scheduled_at
                     db.flush()
-                return EnqueueResult(notification_id=existing.id, status=existing.status)
+                return EnqueueResult(notification_id=existing_pending.id, status=existing_pending.status)
 
+        # ---- создаём новое уведомление
         n = Notification(
             user_id=user_id,
             type=type,
@@ -130,8 +156,7 @@ class NotificationService:
         - scheduled_at is NULL or <= now
 
         retry_index: какой по счёту ретрай планировать при временной ошибке (0..)
-        (так как attempt_no в модели нет, этот счётчик хранить негде; его можно передавать извне,
-         либо добавить колонку attempt_no в модель.)
+        (attempt_no у тебя в модели нет — поэтому retry_index хранить негде, используем 0 по умолчанию)
         """
         n: Notification | None = db.execute(
             select(Notification).where(Notification.id == notification_id).with_for_update()
@@ -158,6 +183,7 @@ class NotificationService:
             # статус остаётся PENDING
             return SendResult(False, n.id, n.status, f"Temporary failure: {e}. Rescheduled.", retry_at)
         except Exception as e:
+            # фатальная ошибка
             n.mark_failed()
             return SendResult(False, n.id, n.status, f"Fatal error: {e}", None)
 
@@ -188,7 +214,7 @@ class NotificationService:
 
         results: list[SendResult] = []
         for n in due:
-            # retry_index без attempt_no хранить негде -> используем 0 (первый делей)
+            # attempt_no хранить негде -> используем первый делей
             results.append(self.send_due(db, notification_id=n.id, retry_index=0))
         return results
 
@@ -199,7 +225,7 @@ class NotificationService:
         Под твой enum NotificationChannel: IN_APP, EMAIL
         """
         if n.channel == NotificationChannel.IN_APP:
-            # IN_APP считаем доставленным: запись уже есть в БД
+            # IN_APP: запись уже есть в БД, считаем доставленным
             return
 
         if n.channel == NotificationChannel.EMAIL:
