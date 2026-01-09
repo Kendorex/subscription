@@ -79,9 +79,20 @@
 
     <section>
       <h3>2) Тарифы</h3>
+
       <p>
         <button id="btnLoadPlans">Показать тарифы</button>
+        <button id="btnPromoToggle" disabled>Промокод</button>
       </p>
+
+      <!-- UI промокода (появляется по кнопке) -->
+      <div id="promoBox" style="display:none; border:1px dashed #aaa; padding:8px; margin:8px 0;">
+        <b>Введите промокод:</b>
+        <input id="promoInput" placeholder="любой текст" size="30" />
+        <button id="btnApplyPromo">Применить</button>
+        <button id="btnPromoHide">Скрыть</button>
+        <div><small id="promoHint"></small></div>
+      </div>
 
       <div>
         <b>Доступные тарифы:</b>
@@ -273,6 +284,9 @@
       let cachedPM = [];
       let cachedSubs = [];
 
+      // PROMO state
+      let promoPlanInjected = false;
+
       const el = (id) => document.getElementById(id);
       const out = el("out");
 
@@ -392,6 +406,111 @@
         node.innerHTML = "";
       }
 
+      // ---------- PROMO helpers ----------
+      // Требуемый API: GET /users/me (пример). Должен вернуть { trial: true/false } или похожее.
+      // Если у тебя другой endpoint/поле — просто поправь в fetchTrialFlag().
+      async function fetchTrialFlag() {
+        // Пытаемся несколько вариантов, чтобы не ломать текущий бекенд:
+        // 1) /users/me
+        // 2) /me
+        // 3) /dev/whoami?email=... (как запасной, если там есть trial)
+        const candidates = [
+          { method: "GET", path: "/users/me" },
+          { method: "GET", path: "/me" },
+        ];
+
+        for (const c of candidates) {
+          try {
+            const r = await request(c.method, c.path);
+            if (r.status >= 200 && r.status < 300 && r.data) {
+              const flag =
+                r.data.trial ??
+                r.data.is_trial ??
+                r.data.has_trial ??
+                r.data.on_trial ??
+                (r.data.user ? (r.data.user.trial ?? r.data.user.is_trial) : undefined);
+
+              if (typeof flag === "boolean") return flag;
+            }
+          } catch {}
+        }
+
+        // fallback: dev/whoami (если там есть trial-атрибут)
+        try {
+          const r2 = await devWhoami(currentEmail);
+          const flag2 =
+            r2.data?.trial ??
+            r2.data?.is_trial ??
+            r2.data?.has_trial ??
+            r2.data?.on_trial;
+          if (typeof flag2 === "boolean") return flag2;
+        } catch {}
+
+        return false; // если API не найдено — считаем что trial нет, промо доступно
+      }
+
+      function getPromoPlanFromAny(plans) {
+        const p = (plans || []).find((x) => String(x?.name || "").toLowerCase() === "promo");
+        return p || null;
+      }
+
+      function injectPromoPlanIfNeeded() {
+        // 1) Если уже есть Promo в планах с бэка — ничего не добавляем
+        const exists = getPromoPlanFromAny(cachedPlans);
+        if (exists) return;
+
+        // 2) Добавляем «виртуальный» план Promo (id может не совпадать, это просто UI)
+        const promoPlan = {
+          id: "78d3054b-97e9-40ba-8463-988313a2ac8e",
+          name: "Promo",
+          price_cents: 1,
+          period: "day",
+          trial_days: 30,
+        };
+
+        cachedPlans = [promoPlan, ...cachedPlans];
+        promoPlanInjected = true;
+      }
+
+      function removePromoPlanIfPresent() {
+        cachedPlans = (cachedPlans || []).filter((p) => String(p?.name || "").toLowerCase() !== "promo");
+        promoPlanInjected = false;
+
+        // если в инпуте был выбран Promo — подчистим
+        const selected = String(el("selectedPlanId").value || "");
+        if (selected && selected.toLowerCase() === "78d3054b-97e9-40ba-8463-988313a2ac8e") {
+          el("selectedPlanId").value = "";
+        }
+      }
+
+      function setPromoUI({ enabled, reason = "" }) {
+        const btn = el("btnPromoToggle");
+        btn.disabled = !enabled;
+        el("promoHint").textContent = reason || "";
+        if (!enabled) {
+          el("promoBox").style.display = "none";
+          el("promoInput").value = "";
+        }
+      }
+
+      async function syncPromoAvailability() {
+        const onTrial = await fetchTrialFlag();
+        if (onTrial) {
+          // Если trial = true: кнопка промо заблокирована и тариф Promo исчезает
+          setPromoUI({ enabled: false, reason: "Промокод недоступен: у пользователя активен trial." });
+          removePromoPlanIfPresent();
+          renderPlans(cachedPlans);
+          return;
+        }
+
+        // trial = false: промо доступно
+        setPromoUI({ enabled: true, reason: "Можно ввести промокод, чтобы увидеть тариф Promo." });
+
+        // Если раньше скрывали промо — просто оставим планы как есть
+        renderPlans(cachedPlans);
+      }
+      // -----------------------------------
+
       function renderPlans(plans) {
         const box = el("plansBox");
         clearBox(box);
@@ -502,7 +621,8 @@
           });
 
           const span = document.createElement("span");
-          span.textContent = ` статус=${status} plan_id=${planId}` + (currentPeriodEnd ? ` period_end=${currentPeriodEnd}` : "");
+          span.textContent =
+            ` статус=${status} plan_id=${planId}` + (currentPeriodEnd ? ` period_end=${currentPeriodEnd}` : "");
 
           li.appendChild(btn);
           li.appendChild(span);
@@ -555,6 +675,9 @@
         if (r.status >= 200 && r.status < 300) {
           cachedPlans = Array.isArray(r.data) ? r.data : (r.data?.items ?? []);
           renderPlans(cachedPlans);
+
+          // после загрузки планов синхронизируем доступность промо (trial flag)
+          await syncPromoAvailability();
         }
       }
 
@@ -597,19 +720,24 @@
       }
 
       document.querySelectorAll(".btnUser").forEach((btn) => {
-        btn.addEventListener("click", () => {
+        btn.addEventListener("click", async () => {
           currentEmail = normalizeEmail(btn.dataset.email);
           setActiveLabels();
           log(`OK: текущий пользователь = ${currentEmail}`);
+
+          // при смене пользователя: обновим trial/промо доступность (не ломая UX)
+          // если планы еще не загружали — просто попробуем выключить/включить кнопку
+          await syncPromoAvailability();
         });
       });
 
-      el("btnUseCustom").addEventListener("click", () => {
+      el("btnUseCustom").addEventListener("click", async () => {
         const v = normalizeEmail(el("customEmail").value);
         if (!v) return log("Введите email");
         currentEmail = v;
         setActiveLabels();
         log(`OK: текущий пользователь = ${currentEmail}`);
+        await syncPromoAvailability();
       });
 
       el("btnUseAdminEmail").addEventListener("click", () => {
@@ -626,6 +754,9 @@
         const r = await devRegister(currentEmail, role, password);
         if (r.status >= 200 && r.status < 300) {
           log(`DEV OK: пользователь создан/существует: ${normalizeEmail(currentEmail)}`);
+
+          // после регистрации — обновим промо доступность (trial может поменяться)
+          await syncPromoAvailability();
         }
       });
 
@@ -645,6 +776,7 @@
           currentEmail = v;
           setActiveLabels();
           log(`DEV OK: create+use => ${currentEmail}`);
+          await syncPromoAvailability();
         }
       });
 
@@ -658,6 +790,41 @@
 
       el("btnLoadPlans").addEventListener("click", async () => {
         await loadPlans();
+      });
+
+      // PROMO button behavior
+      el("btnPromoToggle").addEventListener("click", async () => {
+        // перед открытием — еще раз уточним trial (чтобы точно блокировать)
+        await syncPromoAvailability();
+        if (el("btnPromoToggle").disabled) return;
+
+        const box = el("promoBox");
+        box.style.display = box.style.display === "none" ? "block" : "none";
+        if (box.style.display === "block") {
+          el("promoHint").textContent = "Введите что угодно и нажмите «Применить».";
+        }
+      });
+
+      el("btnPromoHide").addEventListener("click", () => {
+        el("promoBox").style.display = "none";
+      });
+
+      el("btnApplyPromo").addEventListener("click", async () => {
+        // если вдруг trial стал true — убираем промо
+        await syncPromoAvailability();
+        if (el("btnPromoToggle").disabled) return;
+
+        const code = (el("promoInput").value || "").trim();
+        if (!code) {
+          el("promoHint").textContent = "Введите промокод (любой текст).";
+          return;
+        }
+
+        // Появляется тариф Promo
+        injectPromoPlanIfNeeded();
+        renderPlans(cachedPlans);
+        el("promoHint").textContent = `OK: промокод принят (${code}). Появился тариф Promo.`;
+        log(`OK: введён промокод: ${code} → показан тариф Promo`);
       });
 
       el("btnCreatePlan").addEventListener("click", async () => {
@@ -830,6 +997,17 @@
 
         log("Готово: simulate-renewal → обновил подписки/баланс.");
       });
+
+      // Инициализация: сразу проверим trial-флаг и активируем/скроем промо (даже до загрузки планов)
+      (async function initPromo() {
+        // кнопку промо включим после первой проверки trial
+        const onTrial = await fetchTrialFlag();
+        if (onTrial) {
+          setPromoUI({ enabled: false, reason: "Промокод недоступен: у пользователя активен trial." });
+        } else {
+          setPromoUI({ enabled: true, reason: "Можно ввести промокод, чтобы увидеть тариф Promo." });
+        }
+      })();
 
       log("Сценарий (баланс или карта):");
       log("1) DEV: создать пользователя (если нужно)");
