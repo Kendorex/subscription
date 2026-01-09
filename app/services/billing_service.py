@@ -1,3 +1,4 @@
+# billing_service.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -79,17 +80,18 @@ class BillingService:
         if sub.status in {SubscriptionStatus.CANCELED, SubscriptionStatus.EXPIRED}:
             return BillingResult(True, "SKIP_INACTIVE", None, None, None, "Subscription inactive")
 
+        # cancel-at-period-end reached -> EXPIRED and skip charging
         if sub.cancel_at and now >= sub.cancel_at and sub.status in {
             SubscriptionStatus.TRIAL,
             SubscriptionStatus.ACTIVE,
             SubscriptionStatus.PAST_DUE,
         }:
-            sub.status = SubscriptionStatus.CANCELED
-            if not sub.canceled_at:
-                sub.canceled_at = now
+            sub.status = SubscriptionStatus.EXPIRED
             if sub.current_period_end:
-                sub.current_period_end = min(sub.current_period_end, now)
-            return BillingResult(True, "SKIP_CANCELED_AT_PERIOD_END", None, None, None, "Canceled at period end")
+                sub.current_period_end = min(sub.current_period_end, sub.cancel_at)
+            else:
+                sub.current_period_end = sub.cancel_at
+            return BillingResult(True, "SKIP_EXPIRED_AFTER_CANCEL", None, None, None, "Expired after cancel_at")
 
         plan: Plan | None = db.get(Plan, sub.plan_id)
         if not plan or not plan.is_active:
@@ -280,7 +282,7 @@ class BillingService:
 
         return BillingResult(True, "PAID", invoice.id, tx.id, None, "Payment succeeded")
 
-    def _next_attempt_no_period(self, db: Session, *, subscription_id, period_key: str) -> int:
+    def _next_attempt_no_period(self, db: Session, *, subscription_id: str, period_key: str) -> int:
         prefix = f"sub:{subscription_id}:period:{period_key}:attempt:"
         last = db.execute(
             select(Invoice.attempt_no)

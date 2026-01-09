@@ -1,3 +1,4 @@
+# subscription_service.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -152,6 +153,12 @@ class SubscriptionService:
         )
 
     def cancel_at_period_end(self, db: Session, *, subscription_id, when: datetime | None = None) -> Subscription:
+        """
+        Отмена "в конце периода":
+        - cancel_at = current_period_end (а НЕ now)
+        - статус НЕ меняем (подписка должна работать до конца периода)
+        - после наступления cancel_at подписка перейдёт в EXPIRED (см. apply_time_based_transitions / billing_service)
+        """
         when = when or utcnow()
         if when.tzinfo is None:
             when = when.replace(tzinfo=timezone.utc)
@@ -165,11 +172,36 @@ class SubscriptionService:
         if sub.status in (SubscriptionStatus.CANCELED, SubscriptionStatus.EXPIRED):
             return sub
 
-        # если у модели есть helper
-        if hasattr(sub, "mark_canceled"):
-            sub.mark_canceled(when=when)
-        else:
-            sub.cancel_at = when
+        period_end = sub.current_period_end or when
+        if period_end.tzinfo is None:
+            period_end = period_end.replace(tzinfo=timezone.utc)
+
+        # Если период уже закончился — сразу EXPIRED
+        if period_end <= when:
+            sub.status = SubscriptionStatus.EXPIRED
+            sub.cancel_at = period_end
+            if not sub.canceled_at:
+                sub.canceled_at = when
+            if sub.current_period_end:
+                sub.current_period_end = min(sub.current_period_end, period_end)
+            else:
+                sub.current_period_end = period_end
+
+            self.notifier.enqueue_subscription_canceled(
+                db,
+                user_id=sub.user_id,
+                plan_name=None,
+                when=when,
+            )
+            return sub
+
+        # Нормальный кейс: подписка работает до конца оплаченного периода
+        sub.cancel_at = period_end
+        if not sub.canceled_at:
+            # время клика "отменить"
+            sub.canceled_at = when
+
+        # ВАЖНО: статус не меняем здесь
 
         self.notifier.enqueue_subscription_canceled(
             db,
@@ -228,11 +260,10 @@ class SubscriptionService:
             sub.canceled_at = None
             return sub
 
-        if hasattr(sub, "mark_canceled"):
-            sub.mark_canceled(when=now)
-        else:
-            sub.cancel_at = sub.current_period_end or now
-
+        # если мы "меняем со следующего периода", то по сути текущую подписку отменяем на конец периода
+        sub.cancel_at = sub.current_period_end or now
+        if not sub.canceled_at:
+            sub.canceled_at = now
         return sub
 
     def change_plan_immediately(self, db: Session, *, subscription_id, new_plan_id) -> Subscription:
@@ -257,6 +288,10 @@ class SubscriptionService:
         return sub
 
     def apply_time_based_transitions(self, db: Session, *, subscription_id, now: datetime | None = None) -> Subscription:
+        """
+        Переходы по времени:
+        - если достигли cancel_at (т.е. конец периода после "cancel at period end") -> EXPIRED
+        """
         now = now or utcnow()
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
@@ -270,12 +305,13 @@ class SubscriptionService:
         if sub.cancel_at and now >= sub.cancel_at and sub.status in (
             SubscriptionStatus.TRIAL,
             SubscriptionStatus.ACTIVE,
+            SubscriptionStatus.PAST_DUE,
         ):
-            sub.status = SubscriptionStatus.CANCELED
-            if not sub.canceled_at:
-                sub.canceled_at = now
+            sub.status = SubscriptionStatus.EXPIRED
             if sub.current_period_end:
-                sub.current_period_end = min(sub.current_period_end, now)
+                sub.current_period_end = min(sub.current_period_end, sub.cancel_at)
+            else:
+                sub.current_period_end = sub.cancel_at
             return sub
 
         return sub

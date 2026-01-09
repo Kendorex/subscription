@@ -111,15 +111,23 @@ def cancel_subscription(
     if not sub or sub.user_id != user.id:
         raise HTTPException(404, "Subscription not found")
 
-    if sub.status == SubscriptionStatus.CANCELED:
-        return sub
-
     now = now_utc()
 
+    # если уже истекла — не трогаем
+    if sub.status == SubscriptionStatus.EXPIRED:
+        return sub
+
+    # ставим статус canceled сразу (как ты хочешь),
+    # но период НЕ обрезаем
     sub.status = SubscriptionStatus.CANCELED
-    sub.canceled_at = now
-    sub.cancel_at = now
-    sub.current_period_end = min(sub.current_period_end, now) if sub.current_period_end else now
+    sub.canceled_at = sub.canceled_at or now
+
+    # cancel_at = конец текущего периода (опционально, но полезно)
+    # если current_period_end вдруг пустой — ставим now, чтобы не было None
+    sub.cancel_at = sub.current_period_end or now
+
+    # ВАЖНО: НЕ ДЕЛАТЬ:
+    # sub.current_period_end = min(sub.current_period_end, now)
 
     plan = db.get(Plan, sub.plan_id)
     plan_name = plan.name if plan else "Unknown"
