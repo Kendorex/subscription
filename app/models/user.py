@@ -81,6 +81,11 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    
+    trial_used_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     def is_admin(self) -> bool:
         return self.role == UserRole.ADMIN

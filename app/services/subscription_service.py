@@ -1,35 +1,36 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.utils.json_utils import json_dumps
 from models.plan import Plan, BillingPeriod
 from models.subscription import Subscription, SubscriptionStatus
-
-from models.notification import NotificationType, NotificationChannel
+from models.user import User
 from services.notification_service import NotificationService
-from services.billing_service import BillingService
-from payments.fake_gateway import FakePaymentGateway, FakeGatewayConfig
+
 
 class SubscriptionError(Exception):
     pass
 
+
 class ActiveSubscriptionExists(SubscriptionError):
     pass
+
 
 class PlanNotAvailable(SubscriptionError):
     pass
 
+
 class SubscriptionNotFound(SubscriptionError):
     pass
 
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
 
 def add_period(dt: datetime, period: BillingPeriod) -> datetime:
     if period == BillingPeriod.MONTH:
@@ -42,6 +43,7 @@ def add_period(dt: datetime, period: BillingPeriod) -> datetime:
 def add_trial(dt: datetime, trial_days: int) -> datetime:
     return dt + timedelta(days=max(int(trial_days or 0), 0))
 
+
 @dataclass(frozen=True)
 class CreateSubscriptionResult:
     subscription_id: str
@@ -52,6 +54,9 @@ class CreateSubscriptionResult:
 
 
 class SubscriptionService:
+    def __init__(self) -> None:
+        self.notifier = NotificationService()
+
     def create_subscription(
         self,
         db: Session,
@@ -59,7 +64,12 @@ class SubscriptionService:
         user_id,
         plan_id,
         start_at: datetime | None = None,
+        pay_mode: str | None = None,
     ) -> CreateSubscriptionResult:
+        """
+        Создать подписку.
+        Правило: trial можно дать только 1 раз на аккаунт (User.trial_used_at).
+        """
         start_at = start_at or utcnow()
         if start_at.tzinfo is None:
             start_at = start_at.replace(tzinfo=timezone.utc)
@@ -68,11 +78,19 @@ class SubscriptionService:
         if not plan or not plan.is_active:
             raise PlanNotAvailable("Plan not found or inactive")
 
+        # Лочим пользователя, чтобы при параллельных запросах не выдать trial дважды
+        db_user: User = db.execute(
+            select(User).where(User.id == user_id).with_for_update()
+        ).scalar_one()
+
+        # Лочим потенциально активную подписку
         existing_active = db.execute(
             select(Subscription)
             .where(
                 Subscription.user_id == user_id,
-                Subscription.status.in_([SubscriptionStatus.TRIAL, SubscriptionStatus.ACTIVE]),
+                Subscription.status.in_(
+                    [SubscriptionStatus.TRIAL, SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE]
+                ),
             )
             .with_for_update()
         ).scalar_one_or_none()
@@ -80,10 +98,15 @@ class SubscriptionService:
         if existing_active:
             raise ActiveSubscriptionExists("User already has an active subscription")
 
-        if plan.trial_days and plan.trial_days > 0:
+        eligible_trial = bool(plan.trial_days and plan.trial_days > 0 and db_user.trial_used_at is None)
+
+        if eligible_trial:
             status = SubscriptionStatus.TRIAL
             period_start = start_at
-            period_end = add_trial(start_at, plan.trial_days)
+            period_end = add_trial(start_at, int(plan.trial_days or 0))
+
+            # trial считается использованным для аккаунта сразу при выдаче
+            db_user.trial_used_at = start_at
         else:
             status = SubscriptionStatus.ACTIVE
             period_start = start_at
@@ -100,38 +123,24 @@ class SubscriptionService:
             canceled_at=None,
         )
 
+        # если у модели есть pay_mode — установим
+        if hasattr(sub, "pay_mode"):
+            sub.pay_mode = pay_mode or getattr(sub, "pay_mode", None)
+
         db.add(sub)
         db.flush()
-        immediate_payment_attempted = False
-        if status == SubscriptionStatus.ACTIVE and (not plan.trial_days or plan.trial_days <= 0):
-            immediate_payment_attempted = True
 
-            sub.current_period_end = start_at
-
-            gateway = FakePaymentGateway(
-                FakeGatewayConfig(p_success=0.80, p_insufficient=0.10, p_unavailable=0.05, p_declined=0.05)
-            )
-            billing = BillingService(gateway=gateway)
-            billing_result = billing.charge_subscription(db, subscription_id=sub.id)
-
-            if not billing_result.ok:
-                NotificationService().enqueue_payment_failed(
-                    db,
-                    user_id=user_id,
-                    plan_name=plan.name,
-                    reason=billing_result.status,
-                    retry_at=billing_result.retry_at,
-                    when=start_at,
-                    scheduled_at=None,
-                    dedupe=False,
-                )
-
-        NotificationService().enqueue_subscription_created(
+        # Уведомление: у тебя есть enqueue_subscription_created
+        # Для trial тоже используем created (если хочешь — потом добавим отдельный метод trial_started)
+        self.notifier.enqueue_subscription_created(
             db,
             user_id=user_id,
             plan_name=plan.name,
             when=start_at,
         )
+
+        db.flush()
+
         return CreateSubscriptionResult(
             subscription_id=str(sub.id),
             status=sub.status,
@@ -154,9 +163,13 @@ class SubscriptionService:
         if sub.status in (SubscriptionStatus.CANCELED, SubscriptionStatus.EXPIRED):
             return sub
 
-        sub.mark_canceled(when=when)
+        # если у модели есть helper
+        if hasattr(sub, "mark_canceled"):
+            sub.mark_canceled(when=when)
+        else:
+            sub.cancel_at = when
 
-        NotificationService().enqueue_subscription_canceled(
+        self.notifier.enqueue_subscription_canceled(
             db,
             user_id=sub.user_id,
             plan_name=None,
@@ -183,7 +196,7 @@ class SubscriptionService:
         sub.current_period_end = when
         sub.status = SubscriptionStatus.CANCELED
 
-        NotificationService().enqueue_subscription_canceled(
+        self.notifier.enqueue_subscription_canceled(
             db,
             user_id=sub.user_id,
             plan_name=None,
@@ -204,7 +217,7 @@ class SubscriptionService:
 
         now = utcnow()
 
-        if now >= sub.current_period_end:
+        if sub.current_period_end and now >= sub.current_period_end:
             sub.plan_id = new_plan_id
             sub.status = SubscriptionStatus.ACTIVE
             sub.current_period_start = now
@@ -213,7 +226,11 @@ class SubscriptionService:
             sub.canceled_at = None
             return sub
 
-        sub.mark_canceled(when=now)
+        if hasattr(sub, "mark_canceled"):
+            sub.mark_canceled(when=now)
+        else:
+            sub.cancel_at = sub.current_period_end or now
+
         return sub
 
     def change_plan_immediately(self, db: Session, *, subscription_id, new_plan_id) -> Subscription:
@@ -248,11 +265,15 @@ class SubscriptionService:
         if not sub:
             raise SubscriptionNotFound("Subscription not found")
 
-        if sub.cancel_at and now >= sub.cancel_at and sub.status in (SubscriptionStatus.TRIAL, SubscriptionStatus.ACTIVE):
+        if sub.cancel_at and now >= sub.cancel_at and sub.status in (
+            SubscriptionStatus.TRIAL,
+            SubscriptionStatus.ACTIVE,
+        ):
             sub.status = SubscriptionStatus.CANCELED
             if not sub.canceled_at:
                 sub.canceled_at = now
-            sub.current_period_end = min(sub.current_period_end, now)
+            if sub.current_period_end:
+                sub.current_period_end = min(sub.current_period_end, now)
             return sub
 
         return sub

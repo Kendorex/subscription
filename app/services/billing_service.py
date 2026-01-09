@@ -12,6 +12,7 @@ from models.payment_method import PaymentMethod
 from models.invoice import Invoice, InvoiceStatus
 from models.transaction import Transaction, TransactionType, TransactionStatus
 from models.balance_entry import BalanceEntryType
+from models.user import User
 from services.notification_service import NotificationService
 from services.wallet_service import WalletService
 
@@ -25,8 +26,10 @@ from payments.gateway import (
 MAX_ATTEMPTS = 3
 RETRY_DELAYS = [timedelta(minutes=5), timedelta(hours=1), timedelta(hours=6)]
 
+
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
 
 def add_period(dt: datetime, period: BillingPeriod) -> datetime:
     if period == BillingPeriod.MONTH:
@@ -35,10 +38,12 @@ def add_period(dt: datetime, period: BillingPeriod) -> datetime:
         return dt + timedelta(days=365)
     return dt + timedelta(days=30)
 
+
 def _fmt_period_key(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
 
 @dataclass(frozen=True)
 class BillingResult:
@@ -48,6 +53,7 @@ class BillingResult:
     transaction_id: object | None
     retry_at: datetime | None
     message: str
+
 
 class BillingService:
     def __init__(self, gateway: PaymentGateway):
@@ -168,6 +174,10 @@ class BillingService:
                 sub.current_period_end = add_period(start, plan.period)
                 sub.status = SubscriptionStatus.ACTIVE
 
+                u: User | None = db.get(User, sub.user_id)
+                if u and u.trial_used_at is None:
+                    u.trial_used_at = now
+
                 return BillingResult(True, "PAID_BALANCE", invoice.id, tx.id, None, "Paid from balance")
 
             available = self.wallet.get_balance(db, user_id=sub.user_id)
@@ -261,6 +271,10 @@ class BillingService:
         sub.current_period_start = start
         sub.current_period_end = add_period(start, plan.period)
         sub.status = SubscriptionStatus.ACTIVE
+
+        u: User | None = db.get(User, sub.user_id)
+        if u and u.trial_used_at is None:
+            u.trial_used_at = now
 
         return BillingResult(True, "PAID", invoice.id, tx.id, None, "Payment succeeded")
 

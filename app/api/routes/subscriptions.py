@@ -6,23 +6,38 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.services.notification_service import NotificationService
 from db import get_db
 from models.plan import Plan
 from models.subscription import Subscription, SubscriptionStatus
+from models.user import User
 from schemas.subscription import SubscriptionOut, SubscriptionCreate
 from security.auth import get_current_user
+from services.notification_service import NotificationService
+
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
+
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
+
+@router.get("", response_model=list[SubscriptionOut])
+def list_my_subscriptions(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    return db.execute(select(Subscription).where(Subscription.user_id == user.id)).scalars().all()
+
+
 @router.get("/me", response_model=list[SubscriptionOut])
-def my_subscriptions(db: Session = Depends(get_db), user=Depends(get_current_user)):
-    return db.execute(
-        select(Subscription).where(Subscription.user_id == user.id)
+def get_my_subscriptions_me(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    subs = db.execute(
+        select(Subscription)
+        .where(Subscription.user_id == user.id)
+        .order_by(Subscription.started_at.desc())
     ).scalars().all()
+
+    return subs
+
+
 
 @router.post("", response_model=SubscriptionOut)
 def create_subscription(
@@ -37,19 +52,25 @@ def create_subscription(
     active = db.execute(
         select(Subscription).where(
             Subscription.user_id == user.id,
-            Subscription.status.in_(
-                [SubscriptionStatus.TRIAL, SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE]
-            ),
+            Subscription.status.in_([SubscriptionStatus.TRIAL, SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE]),
         )
     ).scalar_one_or_none()
+
     if active:
-        raise HTTPException(409, "User already has an active subscription")
+        raise HTTPException(400, "Active subscription already exists")
 
     start = now_utc()
 
-    if plan.trial_days and plan.trial_days > 0:
+    db_user: User = db.execute(
+        select(User).where(User.id == user.id).with_for_update()
+    ).scalar_one()
+
+    eligible_trial = bool(plan.trial_days and plan.trial_days > 0 and db_user.trial_used_at is None)
+
+    if eligible_trial:
         status = SubscriptionStatus.TRIAL
         period_end = start + timedelta(days=int(plan.trial_days))
+        db_user.trial_used_at = start
     else:
         status = SubscriptionStatus.ACTIVE
         period_end = start
@@ -67,9 +88,10 @@ def create_subscription(
     db.add(sub)
     db.flush()
 
-    NotificationService().enqueue_subscription_created(
+    notifier = NotificationService()
+    notifier.enqueue_subscription_created(
         db,
-        user_id=sub.user_id,
+        user_id=user.id,
         plan_name=plan.name,
         when=start,
     )

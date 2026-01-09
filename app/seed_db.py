@@ -65,7 +65,7 @@ def seed():
             return p
 
         basic = get_or_create_plan("Basic", 29900, BillingPeriod.MONTH, trial_days=7)
-        pro = get_or_create_plan("Pro", 79900, BillingPeriod.MONTH, trial_days=14)
+        pro = get_or_create_plan("Pro", 79900, BillingPeriod.MONTH, trial_days=7)
         yearly = get_or_create_plan("Yearly", 499900, BillingPeriod.YEAR, trial_days=0)
 
         db.commit()
