@@ -33,6 +33,8 @@ def utcnow() -> datetime:
 
 
 def add_period(dt: datetime, period: BillingPeriod) -> datetime:
+    if period == BillingPeriod.DAY:
+        return dt + timedelta(days=1)
     if period == BillingPeriod.MONTH:
         return dt + timedelta(days=30)
     if period == BillingPeriod.YEAR:

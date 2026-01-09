@@ -15,6 +15,7 @@ import uuid
 from db import Base
 
 class BillingPeriod(str, Enum):
+    DAY="day"
     MONTH="month"
     YEAR="year"
 
