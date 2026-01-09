@@ -1,4 +1,3 @@
-# demo_run.py (клади в app/ и запускай: python demo_run.py)
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 
@@ -8,7 +7,6 @@ from models.plan import Plan
 
 from tasks.billing_tasks import run_billing_due
 from tasks.notification_tasks import send_due_notifications
-
 
 def make_one_subscription_due():
     db = SessionLocal()
@@ -23,7 +21,6 @@ def make_one_subscription_due():
             print("Нет подписок для демо. Сначала запусти seed_db.py")
             return None
 
-        # делаем due "в прошлом"
         sub.current_period_end = datetime.now(timezone.utc) - timedelta(seconds=5)
         db.commit()
         print(f"Сделал subscription due: {sub.id} (status={sub.status})")
@@ -31,12 +28,11 @@ def make_one_subscription_due():
     finally:
         db.close()
 
-
 if __name__ == "__main__":
     sub_id = make_one_subscription_due()
 
     print("\n--- RUN BILLING ONCE ---")
-    print(run_billing_due(50))  # celery-task функция, но её можно вызвать как обычную
+    print(run_billing_due(50))
 
     print("\n--- RUN NOTIFICATIONS ONCE ---")
     print(send_due_notifications(50))

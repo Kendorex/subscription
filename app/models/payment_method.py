@@ -56,8 +56,6 @@ class PaymentMethod(Base):
         default=datetime.utcnow,
     )
 
-#relationships
-
     user = relationship(
         "User",
         back_populates="payment_methods",

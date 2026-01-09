@@ -1,4 +1,3 @@
-# payments/fake_gateway.py
 from __future__ import annotations
 
 import random
@@ -13,14 +12,12 @@ from .gateway import (
     PaymentDeclined,
 )
 
-
 @dataclass
 class FakeGatewayConfig:
     p_success: float = 0.80
     p_insufficient: float = 0.10
     p_unavailable: float = 0.05
     p_declined: float = 0.05
-
 
 class FakePaymentGateway(PaymentGateway):
     def __init__(self, cfg: FakeGatewayConfig | None = None):

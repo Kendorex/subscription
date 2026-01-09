@@ -30,7 +30,6 @@ def admin_simulate_renewal(sub_id: str, db: Session = Depends(get_db)):
     if not sub:
         raise HTTPException(404, "Subscription not found")
 
-    # 1️⃣ форсим due
     now = datetime.now(timezone.utc)
     sub.current_period_end = now
     sub.cancel_at = None
@@ -38,10 +37,8 @@ def admin_simulate_renewal(sub_id: str, db: Session = Depends(get_db)):
 
     db.flush()
 
-    # 2️⃣ биллинг
     billing_result = run_billing_due(limit=1)
 
-    # 3️⃣ уведомления
     notif_result = send_due_notifications(limit=10)
 
     return {

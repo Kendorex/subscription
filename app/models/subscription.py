@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     Enum as SqlEnum,
     ForeignKey,
+    String,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -50,6 +51,8 @@ class Subscription(Base):
         index=True,
     )
 
+    pay_mode = Column(String, nullable=False, default="balance")    
+
     started_at = Column(
         DateTime(timezone=True),
         nullable=False,
@@ -67,19 +70,15 @@ class Subscription(Base):
         nullable=False,
     )
 
-    # Если выставлено — подписка будет отменена в указанное время (обычно конец периода)
     cancel_at = Column(
         DateTime(timezone=True),
         nullable=True,
     )
 
-    # Факт отмены (когда пользователь/админ отменил подписку)
     canceled_at = Column(
         DateTime(timezone=True),
         nullable=True,
     )
-
-#relationships
 
     user = relationship(
         "User",
@@ -97,11 +96,8 @@ class Subscription(Base):
         cascade="all, delete-orphan",
     )
 
-#helpers
-
     def is_active(self) -> bool:
         return self.status in (SubscriptionStatus.TRIAL, SubscriptionStatus.ACTIVE)
-#Нужно ли списывать: период закончился и подписка не отменена
     def is_due(self, now: datetime) -> bool:
         if not self.is_active():
             return False
@@ -109,7 +105,6 @@ class Subscription(Base):
             return False
         return now >= self.current_period_end
     
-#Отметить отмену
     def mark_canceled(self, when: datetime | None = None) -> None:
         when = when or datetime.utcnow()
         self.canceled_at = when

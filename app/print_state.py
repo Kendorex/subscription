@@ -1,4 +1,3 @@
-# print_state.py
 from __future__ import annotations
 
 from sqlalchemy import select
@@ -11,12 +10,10 @@ from models.invoice import Invoice
 from models.transaction import Transaction
 from models.notification import Notification
 
-
 def hr(title: str):
     print("\n" + "=" * 80)
     print(title)
     print("=" * 80)
-
 
 def print_users(db):
     hr("USERS")
@@ -24,13 +21,11 @@ def print_users(db):
     for u in rows:
         print(f"- {u.id} | {u.email} | role={u.role}")
 
-
 def print_plans(db):
     hr("PLANS")
     rows = db.execute(select(Plan)).scalars().all()
     for p in rows:
         print(f"- {p.id} | {p.name} | price={p.price_cents} | period={p.period} | active={p.is_active}")
-
 
 def print_subscriptions(db):
     hr("SUBSCRIPTIONS")
@@ -42,7 +37,6 @@ def print_subscriptions(db):
             f"period=({s.current_period_start} -> {s.current_period_end})"
         )
 
-
 def print_invoices(db):
     hr("INVOICES")
     rows = db.execute(select(Invoice).order_by(Invoice.id.desc())).scalars().all()
@@ -52,7 +46,6 @@ def print_invoices(db):
             f"status={i.status} | amount={i.amount_cents} | "
             f"attempt={i.attempt_no} | due_at={i.due_at} | paid_at={i.paid_at}"
         )
-
 
 def print_transactions(db):
     hr("TRANSACTIONS")
@@ -64,7 +57,6 @@ def print_transactions(db):
             f"amount={t.amount_cents} | provider={t.provider}"
         )
 
-
 def print_notifications(db):
     hr("NOTIFICATIONS")
     rows = db.execute(select(Notification).order_by(Notification.id.desc())).scalars().all()
@@ -74,7 +66,6 @@ def print_notifications(db):
             f"type={n.type} | channel={n.channel} | status={n.status} | "
             f"scheduled_at={n.scheduled_at} | sent_at={n.sent_at}"
         )
-
 
 def main():
     db = SessionLocal()
@@ -87,7 +78,6 @@ def main():
         print_notifications(db)
     finally:
         db.close()
-
 
 if __name__ == "__main__":
     main()

@@ -31,7 +31,6 @@ class Refund(Base):
         default=uuid.uuid4,
     )
 
-    # Возврат относится к транзакции списания/операции
     transaction_id = Column(
         UUID(as_uuid=True),
         ForeignKey("transactions.id", ondelete="CASCADE"),
@@ -74,14 +73,10 @@ class Refund(Base):
         nullable=True,
     )
 
-#relationships
-
     transaction = relationship(
         "Transaction",
         back_populates="refund",
     )
-
-#helpers
 
     def mark_succeeded(self, provider_refund_id: str | None = None) -> None:
         self.status = RefundStatus.SUCCEEDED

@@ -20,7 +20,7 @@ class InvoiceStatus(str, Enum):
     PENDING = "pending"
     PAID = "paid"
     FAILED = "failed"
-    VOID = "void"  #подписка отменена, и инвойс больше не нужен
+    VOID = "void"
 
 
 class Invoice(Base):
@@ -57,14 +57,12 @@ class Invoice(Base):
         index=True,
     )
 
-    # Для ретраев
     attempt_no = Column(
         Integer,
         nullable=False,
         default=1,
     )
 
-    # Когда инвойс должен быть оплачен (обычно = конец периода)
     due_at = Column(
         DateTime(timezone=True),
         nullable=False,
@@ -82,7 +80,6 @@ class Invoice(Base):
         nullable=True,
     )
 
-    # Идемпотентность: защита от повторной обработки
     idempotency_key = Column(
         String(128),
         nullable=False,
@@ -90,7 +87,6 @@ class Invoice(Base):
         index=True,
     )
 
-# relationships
     subscription = relationship(
         "Subscription",
         back_populates="invoices",
@@ -100,8 +96,6 @@ class Invoice(Base):
         "Transaction",
         back_populates="invoice",
     )
-
-#helpers
 
     def mark_paid(self, when: datetime | None = None) -> None:
         self.status = InvoiceStatus.PAID

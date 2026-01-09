@@ -13,7 +13,7 @@ router = APIRouter(prefix="/plans", tags=["plans"])
 
 @router.get("", response_model=list[PlanOut])
 def list_plans(db: Session = Depends(get_db)):
-    return db.execute(select(Plan).where(Plan.is_active == True)).scalars().all()  # noqa: E712
+    return db.execute(select(Plan).where(Plan.is_active == True)).scalars().all()
 
 
 admin_router = APIRouter(prefix="/admin/plans", tags=["admin:plans"])
@@ -30,10 +30,9 @@ def create_plan(payload: PlanCreate, db: Session = Depends(get_db)) -> Plan:
     db.add(plan)
 
     try:
-        db.flush()  # тут и ловится UniqueViolation
+        db.flush()
     except IntegrityError as e:
         db.rollback()
-        # максимально просто: на зачёт этого достаточно
         raise HTTPException(status_code=409, detail="Plan name already exists") from e
 
     return plan

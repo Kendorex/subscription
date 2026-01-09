@@ -11,11 +11,6 @@ def get_current_user(
     db: Session = Depends(get_db),
     x_user_email: str | None = Header(default=None, alias="X-User-Email"),
 ):
-    """
-    Упрощённо для демо:
-    - передаёшь X-User-Email: alice@example.com
-    - юзера ищем в БД
-    """
     if not x_user_email:
         raise HTTPException(status_code=401, detail="Missing X-User-Email header")
 

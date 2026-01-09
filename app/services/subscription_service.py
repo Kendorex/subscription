@@ -1,4 +1,3 @@
-# services/subscription_service.py
 from __future__ import annotations
 
 import json
@@ -17,29 +16,22 @@ from services.notification_service import NotificationService
 from services.billing_service import BillingService
 from payments.fake_gateway import FakePaymentGateway, FakeGatewayConfig
 
-
 class SubscriptionError(Exception):
     pass
-
 
 class ActiveSubscriptionExists(SubscriptionError):
     pass
 
-
 class PlanNotAvailable(SubscriptionError):
     pass
-
 
 class SubscriptionNotFound(SubscriptionError):
     pass
 
-
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
-
 def add_period(dt: datetime, period: BillingPeriod) -> datetime:
-    # Упрощение для зачёта: месяц=30 дней, год=365 дней
     if period == BillingPeriod.MONTH:
         return dt + timedelta(days=30)
     if period == BillingPeriod.YEAR:
@@ -49,7 +41,6 @@ def add_period(dt: datetime, period: BillingPeriod) -> datetime:
 
 def add_trial(dt: datetime, trial_days: int) -> datetime:
     return dt + timedelta(days=max(int(trial_days or 0), 0))
-
 
 @dataclass(frozen=True)
 class CreateSubscriptionResult:
@@ -61,16 +52,6 @@ class CreateSubscriptionResult:
 
 
 class SubscriptionService:
-    """
-    Жизненный цикл подписки:
-    - create
-    - cancel (end of period / immediately)
-    - change plan (next period / immediately)
-    - time-based transitions (только отмена по cancel_at; никаких "trial->active" без оплаты)
-    """
-
-    # ---------- Create ----------
-
     def create_subscription(
         self,
         db: Session,
@@ -87,7 +68,6 @@ class SubscriptionService:
         if not plan or not plan.is_active:
             raise PlanNotAvailable("Plan not found or inactive")
 
-        # блокируем активную подписку пользователя от гонок
         existing_active = db.execute(
             select(Subscription)
             .where(
@@ -100,7 +80,6 @@ class SubscriptionService:
         if existing_active:
             raise ActiveSubscriptionExists("User already has an active subscription")
 
-        # trial или активная сразу
         if plan.trial_days and plan.trial_days > 0:
             status = SubscriptionStatus.TRIAL
             period_start = start_at
@@ -123,12 +102,10 @@ class SubscriptionService:
 
         db.add(sub)
         db.flush()
-        # --- immediate charge: если нет trial, пытаемся списать сразу ---
         immediate_payment_attempted = False
         if status == SubscriptionStatus.ACTIVE and (not plan.trial_days or plan.trial_days <= 0):
             immediate_payment_attempted = True
 
-            # делаем подписку 'due now', чтобы BillingService выполнил попытку списания немедленно
             sub.current_period_end = start_at
 
             gateway = FakePaymentGateway(
@@ -137,7 +114,6 @@ class SubscriptionService:
             billing = BillingService(gateway=gateway)
             billing_result = billing.charge_subscription(db, subscription_id=sub.id)
 
-            # если оплата не прошла — шлём уведомление (и оставляем ретраи на billing_tasks)
             if not billing_result.ok:
                 NotificationService().enqueue_payment_failed(
                     db,
@@ -150,8 +126,6 @@ class SubscriptionService:
                     dedupe=False,
                 )
 
-
-        # ✅ СРАЗУ после оформления — уведомление "подписка оформлена"
         NotificationService().enqueue_subscription_created(
             db,
             user_id=user_id,
@@ -166,8 +140,6 @@ class SubscriptionService:
             cancel_at=sub.cancel_at,
         )
 
-    # ---------- Cancel ----------
-
     def cancel_at_period_end(self, db: Session, *, subscription_id, when: datetime | None = None) -> Subscription:
         when = when or utcnow()
         if when.tzinfo is None:
@@ -180,12 +152,10 @@ class SubscriptionService:
             raise SubscriptionNotFound("Subscription not found")
 
         if sub.status in (SubscriptionStatus.CANCELED, SubscriptionStatus.EXPIRED):
-            return sub  # идемпотентно
+            return sub
 
-        # выставляем cancel_at = конец текущего периода
         sub.mark_canceled(when=when)
 
-        # ✅ уведомление "подписка отменена" (факт отмены пользователем, даже если действует до конца периода)
         NotificationService().enqueue_subscription_canceled(
             db,
             user_id=sub.user_id,
@@ -220,8 +190,6 @@ class SubscriptionService:
             when=when,
         )
         return sub
-
-    # ---------- Change plan ----------
 
     def change_plan_next_period(self, db: Session, *, subscription_id, new_plan_id) -> Subscription:
         sub: Subscription | None = db.execute(
@@ -269,15 +237,7 @@ class SubscriptionService:
         sub.canceled_at = None
         return sub
 
-    # ---------- Time-based transitions ----------
-
     def apply_time_based_transitions(self, db: Session, *, subscription_id, now: datetime | None = None) -> Subscription:
-        """
-        ВАЖНО: здесь НЕ делаем trial->active и НЕ продлеваем период.
-        Этим занимается BillingService строго в момент current_period_end.
-        Здесь только:
-        - отмена по cancel_at
-        """
         now = now or utcnow()
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
@@ -288,7 +248,6 @@ class SubscriptionService:
         if not sub:
             raise SubscriptionNotFound("Subscription not found")
 
-        # отмена по расписанию (в конце периода)
         if sub.cancel_at and now >= sub.cancel_at and sub.status in (SubscriptionStatus.TRIAL, SubscriptionStatus.ACTIVE):
             sub.status = SubscriptionStatus.CANCELED
             if not sub.canceled_at:

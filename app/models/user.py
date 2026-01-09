@@ -1,26 +1,23 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import (
-    Column,
-    String,
-    DateTime,
-    Enum as SqlEnum,
-)
+from sqlalchemy import Column, String, DateTime, Enum as SqlEnum, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import uuid
 
 from db import Base
 
+
 class UserRole(str, Enum):
-    USER="user"
-    ADMIN="admin"
+    USER = "user"
+    ADMIN = "admin"
+
 
 class User(Base):
     __tablename__ = "users"
 
-    id=Column(
+    id = Column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4
@@ -33,7 +30,7 @@ class User(Base):
         index=True
     )
 
-    password_hash= Column(
+    password_hash = Column(
         String(255),
         nullable=False,
     )
@@ -42,15 +39,20 @@ class User(Base):
         SqlEnum(UserRole, name="user_role"),
         nullable=False,
         default=UserRole.USER,
-)
+    )
 
-    created_at=Column(
+    balance_cents = Column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+
+    created_at = Column(
         DateTime(timezone=True),
         nullable=False,
         default=datetime.utcnow
     )
 
-#Relationships
     subscriptions = relationship(
         "Subscription",
         back_populates="user",
@@ -74,9 +76,14 @@ class User(Base):
         cascade="all, delete-orphan"
     )
 
-#helpers
+    balance_entries = relationship(
+        "BalanceEntry",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
     def is_admin(self) -> bool:
         return self.role == UserRole.ADMIN
-    
+
     def __repr__(self) -> str:
-        return f"<User id={self.id} email={self.email} role={self.role}>"
+        return f"<User id={self.id} email={self.email} role={self.role} balance_cents={self.balance_cents}>"

@@ -77,7 +77,7 @@ class Transaction(Base):
     provider = Column(
         String(50),
         nullable=False,
-        default="fake",  # например: fake / yoomoney
+        default="fake",
         index=True,
     )
 
@@ -87,7 +87,6 @@ class Transaction(Base):
         index=True,
     )
 
-    # Ключ идемпотентности на уровне транзакции
     idempotency_key = Column(
         String(128),
         nullable=True,
@@ -99,8 +98,6 @@ class Transaction(Base):
         nullable=False,
         default=datetime.utcnow,
     )
-
-#relationships
 
     user = relationship(
         "User",
@@ -118,8 +115,6 @@ class Transaction(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
-
-#helpers
 
     def mark_succeeded(self, provider_payment_id: str | None = None) -> None:
         self.status = TransactionStatus.SUCCEEDED

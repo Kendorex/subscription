@@ -97,13 +97,11 @@ class Notification(Base):
         default=datetime.utcnow,
     )
 
-#relationships
     user = relationship(
         "User",
         back_populates="notifications",
     )
 
-#helpers
     def mark_sent(self, when: datetime | None = None) -> None:
         self.status = NotificationStatus.SENT
         self.sent_at = when or datetime.utcnow()

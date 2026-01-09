@@ -17,7 +17,6 @@ def list_my_methods(db: Session = Depends(get_db), user=Depends(get_current_user
 
 @router.post("", response_model=PaymentMethodOut)
 def add_method(payload: PaymentMethodCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
-    # если ставим default, сбросим предыдущие default
     if payload.is_default:
         db.execute(
             update(PaymentMethod)

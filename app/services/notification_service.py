@@ -1,4 +1,3 @@
-# services/notification_service.py
 from __future__ import annotations
 
 import json
@@ -8,7 +7,8 @@ import ssl
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
-from typing import Any
+from email.utils import formatdate, make_msgid
+from typing import Any, Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -20,7 +20,7 @@ from models.notification import (
     NotificationChannel,
     NotificationStatus,
 )
-from models.user import User  # <-- путь поправь под свой проект
+from models.user import User
 
 RETRY_DELAYS = [
     timedelta(minutes=1),
@@ -32,14 +32,15 @@ RETRY_DELAYS = [
 
 FAIL_THROTTLE_WINDOW = timedelta(minutes=10)
 
-
 class NotificationError(Exception):
     pass
-
 
 class NotificationSendTemporaryError(NotificationError):
     """Временная ошибка канала (можно ретраить)."""
 
+
+class NotificationSendPermanentError(NotificationError):
+    """Постоянная ошибка канала (ретраить не надо)."""
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
@@ -56,7 +57,6 @@ def _payload_load(payload: str | None) -> dict[str, Any]:
     try:
         return json.loads(payload)
     except Exception:
-        # на случай если раньше payload был обычной строкой
         return {"text": payload}
 
 
@@ -66,53 +66,44 @@ def _payload_dump(data: dict[str, Any]) -> str:
 
 @dataclass(frozen=True)
 class EnqueueResult:
-    notification_id: object  # UUID
+    notification_id: object
     status: NotificationStatus
 
 
 @dataclass(frozen=True)
 class SendResult:
     ok: bool
-    notification_id: object  # UUID
+    notification_id: object
     status: NotificationStatus
     message: str
     retry_at: datetime | None
 
 
 class NotificationService:
-    """
-    - enqueue(): создаёт уведомление
-    - send_due(): отправляет уведомление, если оно due
-    - send_due_batch(): отправляет пачку due уведомлений
-
-    Ретраи:
-      - статус остаётся PENDING
-      - scheduled_at переносится
-      - attempt хранится в payload["attempt"] (без миграции БД)
-    """
-
-    # -------------------- public: enqueue helpers --------------------
-
+    
     def enqueue_subscription_created(
         self, db: Session, *, user_id, plan_name: str | None = None, when: datetime | None = None
     ) -> EnqueueResult:
         subject, text = self._tpl_subscription_created(plan_name=plan_name, when=when)
-        return self._enqueue_email(db, user_id=user_id, type=NotificationType.SUBSCRIPTION_CREATED,
-                                  subject=subject, text=text)
+        return self._enqueue_email(
+            db, user_id=user_id, type=NotificationType.SUBSCRIPTION_CREATED, subject=subject, text=text
+        )
 
     def enqueue_subscription_renewed(
         self, db: Session, *, user_id, plan_name: str | None = None, when: datetime | None = None
     ) -> EnqueueResult:
         subject, text = self._tpl_subscription_renewed(plan_name=plan_name, when=when)
-        return self._enqueue_email(db, user_id=user_id, type=NotificationType.SUBSCRIPTION_RENEWED,
-                                  subject=subject, text=text)
+        return self._enqueue_email(
+            db, user_id=user_id, type=NotificationType.SUBSCRIPTION_RENEWED, subject=subject, text=text
+        )
 
     def enqueue_subscription_canceled(
         self, db: Session, *, user_id, plan_name: str | None = None, when: datetime | None = None
     ) -> EnqueueResult:
         subject, text = self._tpl_subscription_canceled(plan_name=plan_name, when=when)
-        return self._enqueue_email(db, user_id=user_id, type=NotificationType.SUBSCRIPTION_CANCELED,
-                                  subject=subject, text=text)
+        return self._enqueue_email(
+            db, user_id=user_id, type=NotificationType.SUBSCRIPTION_CANCELED, subject=subject, text=text
+        )
 
     def enqueue_payment_ok(
         self,
@@ -132,10 +123,12 @@ class NotificationService:
 
         subject = "Оплата по подписке прошла успешно"
         text = (
+            f"Здравствуйте!\n\n"
             f"Оплата прошла успешно ({when_s}).\n"
             f"{plan_s}\n"
             f"{sub_s}\n"
-            f"{inv_s}\n"
+            f"{inv_s}\n\n"
+            f"Это автоматическое уведомление."
         ).strip()
 
         return self._enqueue_email(
@@ -146,13 +139,6 @@ class NotificationService:
             text=text,
             dedupe=dedupe,
         )
-
-
-
-    def _fmt_dt(self, when: datetime | None) -> str:
-        # backward-compat: older templates call _fmt_dt
-        return self._fmt_when(when)
-
 
     def enqueue_payment_failed(
         self,
@@ -182,57 +168,64 @@ class NotificationService:
             dedupe=dedupe,
         )
 
-    def _tpl_payment_failed(
+    def enqueue_insufficient_balance(
         self,
+        db: Session,
         *,
+        user_id,
         plan_name: str | None = None,
-        reason: str | None = None,
-        retry_at: datetime | None = None,
+        required_cents: int | None = None,
+        available_cents: int | None = None,
         when: datetime | None = None,
-    ) -> tuple[str, str]:
+        dedupe: bool = True,
+    ) -> EnqueueResult:
         when_s = self._fmt_when(when or now_utc())
         plan_s = f"Тариф: {plan_name}." if plan_name else ""
-        reason_s = f"Причина: {reason}." if reason else ""
-        retry_s = f"Следующая попытка: {self._fmt_when(retry_at)}." if retry_at else ""
-        subject = "Не удалось списать оплату по подписке"
+        need_s = f"Нужно: {required_cents} cents." if required_cents is not None else ""
+        have_s = f"Доступно: {available_cents} cents." if available_cents is not None else ""
+
+        subject = "Недостаточно средств на балансе"
         text = (
-            f"Мы попытались списать оплату по вашей подписке ({when_s}).\n"
+            f"Здравствуйте!\n\n"
+            f"Не удалось списать оплату с баланса ({when_s}).\n"
             f"{plan_s}\n"
-            f"{reason_s}\n"
-            f"{retry_s}\n"
-            "Проверьте способ оплаты и попробуйте снова."
+            f"{need_s}\n"
+            f"{have_s}\n\n"
+            "Пополните баланс или выберите оплату картой.\n"
+            "Это автоматическое уведомление."
         ).strip()
-        return subject, text
+
+        return self._enqueue_email(
+            db,
+            user_id=user_id,
+            type=NotificationType.PAYMENT_FAIL,
+            subject=subject,
+            text=text,
+            dedupe=dedupe,
+        )
 
     def _enqueue_email(
-            self,
-            db: Session,
-            *,
-            user_id,
-            type: NotificationType,
-            subject: str,
-            text: str,
-            scheduled_at: datetime | None = None,
-            dedupe: bool = True,
-        ) -> EnqueueResult:
-            payload = _payload_dump(
-                {
-                    "subject": subject,
-                    "text": text,
-                    "attempt": 0,
-                }
-            )
-            return self.enqueue(
-                db,
-                user_id=user_id,
-                type=type,
-                channel=NotificationChannel.EMAIL,
-                payload=payload,
-                scheduled_at=scheduled_at,
-                dedupe=dedupe,
-                throttle=(type == NotificationType.PAYMENT_FAIL),
-            )
-    # -------------------- enqueue (core) --------------------
+        self,
+        db: Session,
+        *,
+        user_id,
+        type: NotificationType,
+        subject: str,
+        text: str,
+        scheduled_at: datetime | None = None,
+        dedupe: bool = True,
+    ) -> EnqueueResult:
+        payload = _payload_dump({"subject": subject, "text": text, "attempt": 0})
+        return self.enqueue(
+            db,
+            user_id=user_id,
+            type=type,
+            channel=NotificationChannel.EMAIL,
+            payload=payload,
+            scheduled_at=scheduled_at,
+            dedupe=dedupe,
+            throttle=(type == NotificationType.PAYMENT_FAIL),
+        )
 
     def enqueue(
         self,
@@ -249,7 +242,6 @@ class NotificationService:
         if scheduled_at is not None and scheduled_at.tzinfo is None:
             scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
 
-        # анти-спам для PAYMENT_FAIL (по недавно SENT)
         if throttle and type == NotificationType.PAYMENT_FAIL:
             since = now_utc() - FAIL_THROTTLE_WINDOW
             recent_sent = db.execute(
@@ -264,7 +256,6 @@ class NotificationService:
             if recent_sent:
                 return EnqueueResult(notification_id=recent_sent.id, status=recent_sent.status)
 
-        # дедупликация: не плодим одинаковые PENDING
         if dedupe:
             existing_pending = db.execute(
                 select(Notification).where(
@@ -296,8 +287,6 @@ class NotificationService:
         db.flush()
         return EnqueueResult(notification_id=n.id, status=n.status)
 
-    # -------------------- sending --------------------
-
     def send_due(self, db: Session, *, notification_id) -> SendResult:
         n: Notification | None = db.execute(
             select(Notification).where(Notification.id == notification_id).with_for_update()
@@ -321,21 +310,37 @@ class NotificationService:
 
         try:
             self._send_via_channel(db, n, payload)
+
         except NotificationSendTemporaryError as e:
             retry_at = compute_retry_at(attempt)
             payload["attempt"] = attempt + 1
             n.payload = _payload_dump(payload)
             n.scheduled_at = retry_at
-            # статус остаётся PENDING
+
+            print(
+                f"[notification] TEMPFAIL id={n.id} user_id={n.user_id} "
+                f"type={n.type} channel={n.channel} attempt={attempt+1} "
+                f"retry_at={retry_at.isoformat()} err={repr(e)}"
+            )
             return SendResult(False, n.id, n.status, f"Temporary failure: {e}. Rescheduled.", retry_at)
+
+        except NotificationSendPermanentError as e:
+            print(
+                f"[notification] PERMFAIL id={n.id} user_id={n.user_id} "
+                f"type={n.type} channel={n.channel} err={repr(e)}"
+            )
+            n.mark_failed()
+            n.scheduled_at = None
+            return SendResult(False, n.id, n.status, f"Permanent failure: {e}", None)
+
         except Exception as e:
             print(
                 f"[notification] FATAL id={n.id} user_id={n.user_id} "
                 f"type={n.type} channel={n.channel} err={repr(e)}"
             )
             n.mark_failed()
+            n.scheduled_at = None
             return SendResult(False, n.id, n.status, f"Fatal error: {e}", None)
-
 
         n.mark_sent(when=now)
         n.scheduled_at = None
@@ -343,7 +348,6 @@ class NotificationService:
 
     def send_due_batch(self, db: Session, *, limit: int = 50) -> list[SendResult]:
         now = now_utc()
-
         due = (
             db.execute(
                 select(Notification)
@@ -357,10 +361,7 @@ class NotificationService:
             .scalars()
             .all()
         )
-
         return [self.send_due(db, notification_id=n.id) for n in due]
-
-    # -------------------- channel adapters --------------------
 
     def _send_via_channel(self, db: Session, n: Notification, payload: dict[str, Any]) -> None:
         if n.channel == NotificationChannel.IN_APP:
@@ -382,35 +383,71 @@ class NotificationService:
     def _send_email(self, *, to_email: str, subject: str, text: str) -> None:
         host = os.getenv("SMTP_HOST")
         port = int(os.getenv("SMTP_PORT", "587"))
-        user = os.getenv("SMTP_USER")
-        password = os.getenv("SMTP_PASSWORD")
-        from_email = os.getenv("SMTP_FROM") or user
 
-        if not host or not user or not password or not from_email:
-            raise Exception("SMTP env is not configured (SMTP_HOST/SMTP_USER/SMTP_PASSWORD/SMTP_FROM)")
+        user: Optional[str] = os.getenv("SMTP_USER")
+        password: Optional[str] = os.getenv("SMTP_PASSWORD")
+
+        from_email = os.getenv("SMTP_FROM") or user
+        from_name = os.getenv("SMTP_FROM_NAME", "Subscription App")
+        reply_to = os.getenv("SMTP_REPLY_TO") or from_email
+
+        use_ssl = os.getenv("SMTP_USE_SSL", "0") == "1"
+        use_starttls = os.getenv("SMTP_STARTTLS", "1") == "1"
+
+        if not host or not from_email:
+            print(f"[DEV EMAIL - SMTP not configured] to={to_email} subject={subject}\n{text}\n---")
+            return
 
         msg = EmailMessage()
-        msg["From"] = from_email
+        msg["From"] = f"{from_name} <{from_email}>" if from_name else from_email
         msg["To"] = to_email
         msg["Subject"] = subject
-        msg.set_content(text)
+        msg["Date"] = formatdate(localtime=False)
+        msg["Message-ID"] = make_msgid(domain=(from_email.split("@")[-1] if "@" in from_email else None))
+        if reply_to:
+            msg["Reply-To"] = reply_to
+        msg.set_content(text, subtype="plain", charset="utf-8")
 
         context = ssl.create_default_context()
 
+        def _raise_by_smtp_code(e: smtplib.SMTPResponseException) -> None:
+            code = int(getattr(e, "smtp_code", 0) or 0)
+            err = getattr(e, "smtp_error", b"")
+            if isinstance(err, (bytes, bytearray)):
+                err = err.decode("utf-8", errors="replace")
+            full = f"{code} {err}"
+
+            if 400 <= code < 500:
+                raise NotificationSendTemporaryError(full)
+            if 500 <= code < 600:
+                raise NotificationSendPermanentError(full)
+            raise NotificationSendTemporaryError(full)
+
         try:
-            with smtplib.SMTP(host, port, timeout=20) as server:
-                server.ehlo()
-                server.starttls(context=context)
-                server.ehlo()
-                server.login(user, password)
-                server.send_message(msg)
-        except (smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError, TimeoutError) as e:
-            raise NotificationSendTemporaryError(str(e))
-        except smtplib.SMTPException as e:
-            # часто тоже временно (лимиты, greylisting, etc.)
+            if use_ssl:
+                with smtplib.SMTP_SSL(host, port, timeout=20, context=context) as server:
+                    server.ehlo()
+                    if user and password:
+                        server.login(user, password)
+                    server.send_message(msg)
+            else:
+                with smtplib.SMTP(host, port, timeout=20) as server:
+                    server.ehlo()
+                    if use_starttls:
+                        server.starttls(context=context)
+                        server.ehlo()
+                    if user and password:
+                        server.login(user, password)
+                    server.send_message(msg)
+
+        except (smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError, TimeoutError, OSError) as e:
             raise NotificationSendTemporaryError(str(e))
 
-    # -------------------- templates --------------------
+        except smtplib.SMTPResponseException as e:
+            _raise_by_smtp_code(e)
+
+        except smtplib.SMTPException as e:
+            raise NotificationSendTemporaryError(str(e))
 
     def _fmt_when(self, when: datetime | None) -> str:
         dt = when or now_utc()
@@ -421,17 +458,59 @@ class NotificationService:
     def _tpl_subscription_created(self, *, plan_name: str | None, when: datetime | None) -> tuple[str, str]:
         plan = plan_name or "ваш тариф"
         subject = "Подписка оформлена"
-        text = f"Подписка оформлена.\nТариф: {plan}\nДата: {self._fmt_when(when)}\n"
+        text = (
+            "Здравствуйте!\n\n"
+            "Подписка успешно оформлена.\n"
+            f"Тариф: {plan}\n"
+            f"Дата: {self._fmt_when(when)}\n\n"
+            "Это автоматическое уведомление."
+        )
         return subject, text
 
     def _tpl_subscription_renewed(self, *, plan_name: str | None, when: datetime | None) -> tuple[str, str]:
         plan = plan_name or "ваш тариф"
         subject = "Подписка продлена"
-        text = f"Подписка продлена.\nТариф: {plan}\nДата: {self._fmt_when(when)}\n"
+        text = (
+            "Здравствуйте!\n\n"
+            "Подписка успешно продлена.\n"
+            f"Тариф: {plan}\n"
+            f"Дата: {self._fmt_when(when)}\n\n"
+            "Это автоматическое уведомление."
+        )
         return subject, text
 
     def _tpl_subscription_canceled(self, *, plan_name: str | None, when: datetime | None) -> tuple[str, str]:
         plan = plan_name or "ваш тариф"
         subject = "Подписка отменена"
-        text = f"Подписка отменена.\nТариф: {plan}\nДата: {self._fmt_when(when)}\n"
+        text = (
+            "Здравствуйте!\n\n"
+            "Подписка отменена.\n"
+            f"Тариф: {plan}\n"
+            f"Дата: {self._fmt_when(when)}\n\n"
+            "Это автоматическое уведомление."
+        )
+        return subject, text
+
+    def _tpl_payment_failed(
+        self,
+        *,
+        plan_name: str | None = None,
+        reason: str | None = None,
+        retry_at: datetime | None = None,
+        when: datetime | None = None,
+    ) -> tuple[str, str]:
+        when_s = self._fmt_when(when or now_utc())
+        plan_s = f"Тариф: {plan_name}." if plan_name else ""
+        reason_s = f"Причина: {reason}." if reason else ""
+        retry_s = f"Следующая попытка: {self._fmt_when(retry_at)}." if retry_at else ""
+        subject = "Не удалось списать оплату по подписке"
+        text = (
+            "Здравствуйте!\n\n"
+            f"Мы попытались списать оплату по вашей подписке ({when_s}).\n"
+            f"{plan_s}\n"
+            f"{reason_s}\n"
+            f"{retry_s}\n\n"
+            "Проверьте способ оплаты и попробуйте снова.\n"
+            "Это автоматическое уведомление."
+        ).strip()
         return subject, text

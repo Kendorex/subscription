@@ -1,4 +1,3 @@
-# tasks/celery_app.py
 from __future__ import annotations
 from dotenv import load_dotenv
 load_dotenv()
@@ -22,19 +21,18 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,
-    worker_prefetch_multiplier=1,  # меньше шансов на “залипание” задач
+    worker_prefetch_multiplier=1,
 )
 
-# Celery Beat расписание
 celery_app.conf.beat_schedule = {
-    "billing-every-1-min": {
+    "billing-every-30-sec": {
         "task": "tasks.billing_tasks.run_billing_due",
-        "schedule": 60.0,
+        "schedule": 30.0,
         "args": (200,),
     },
-    "notifications-every-30-sec": {
+    "notifications-every-60-sec": {
         "task": "tasks.notification_tasks.send_due_notifications",
-        "schedule": 30.0,
+        "schedule": 60.0,
         "args": (200,),
     },
 }

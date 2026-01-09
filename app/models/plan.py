@@ -55,13 +55,11 @@ class Plan(Base):
         default=True
     )
 
-#Relationships
     subscriptions = relationship(
         "Subscription",
         back_populates="plan"
     )
 
-#Helpers
     def is_trial(self) -> bool:
         return self.trial_days > 0
     

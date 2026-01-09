@@ -6,3 +6,4 @@ from .transaction import Transaction
 from .refund import Refund
 from .payment_method import PaymentMethod
 from .notification import Notification
+from .balance_entry import BalanceEntry, BalanceEntryType
