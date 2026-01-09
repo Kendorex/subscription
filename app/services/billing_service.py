@@ -20,7 +20,6 @@ from payments.gateway import (
     PaymentDeclined,
 )
 
-# ---- настройки ретраев
 MAX_ATTEMPTS = 3
 RETRY_DELAYS = [timedelta(minutes=5), timedelta(hours=1), timedelta(hours=6)]
 
@@ -50,13 +49,13 @@ class BillingResult:
 class BillingService:
     """
     Делает одну попытку списания для конкретной подписки.
+    Автопродление/первое списание после trial происходит строго когда now >= current_period_end.
     """
 
     def __init__(self, gateway: PaymentGateway):
         self.gateway = gateway
 
     def charge_subscription(self, db: Session, subscription_id) -> BillingResult:
-        # 1) блокируем подписку
         sub: Subscription | None = db.execute(
             select(Subscription).where(Subscription.id == subscription_id).with_for_update()
         ).scalar_one_or_none()
@@ -70,16 +69,30 @@ class BillingService:
         if sub.current_period_end and sub.current_period_end > now:
             return BillingResult(True, "SKIP_NOT_DUE", None, None, None, "Not due yet")
 
+        # подписка неактивна
         if sub.status in {SubscriptionStatus.CANCELED, SubscriptionStatus.EXPIRED}:
             return BillingResult(True, "SKIP_INACTIVE", None, None, None, "Subscription inactive")
 
-        # 2) план
+        # ✅ если наступил cancel_at (отмена в конце периода) — НЕ списываем, отменяем
+        if sub.cancel_at and now >= sub.cancel_at and sub.status in {
+            SubscriptionStatus.TRIAL,
+            SubscriptionStatus.ACTIVE,
+            SubscriptionStatus.PAST_DUE,
+        }:
+            sub.status = SubscriptionStatus.CANCELED
+            if not sub.canceled_at:
+                sub.canceled_at = now
+            if sub.current_period_end:
+                sub.current_period_end = min(sub.current_period_end, now)
+            return BillingResult(True, "SKIP_CANCELED_AT_PERIOD_END", None, None, None, "Canceled at period end")
+
+        # план
         plan: Plan | None = db.get(Plan, sub.plan_id)
         if not plan or not plan.is_active:
             sub.status = SubscriptionStatus.EXPIRED
             return BillingResult(False, "PLAN_INACTIVE", None, None, None, "Plan is inactive")
 
-        # 3) дефолтный способ оплаты
+        # дефолтный способ оплаты
         pm: PaymentMethod | None = db.execute(
             select(PaymentMethod)
             .where(PaymentMethod.user_id == sub.user_id, PaymentMethod.is_default == True)  # noqa: E712
@@ -90,21 +103,16 @@ class BillingService:
             sub.status = SubscriptionStatus.PAST_DUE
             return BillingResult(False, "NO_PAYMENT_METHOD", None, None, None, "No payment method")
 
-        # 4) attempt_no (на базе прошлых инвойсов)
+        # attempt_no по прошлым инвойсам
         attempt_no = self._next_attempt_no(db, sub.id)
 
-        # Если попыток уже слишком много — считаем фейлом (без бесконечного ретрая)
         if attempt_no > MAX_ATTEMPTS:
             sub.status = SubscriptionStatus.PAST_DUE
             return BillingResult(False, "MAX_ATTEMPTS_REACHED", None, None, None, "Max attempts reached")
 
-        # 5) идемпотентность по ключу попытки (invoice+tx)
         idempotency_key = f"sub:{sub.id}:attempt:{attempt_no}"
 
-        invoice = db.execute(
-            select(Invoice).where(Invoice.idempotency_key == idempotency_key)
-        ).scalar_one_or_none()
-
+        invoice = db.execute(select(Invoice).where(Invoice.idempotency_key == idempotency_key)).scalar_one_or_none()
         if not invoice:
             invoice = Invoice(
                 subscription_id=sub.id,
@@ -112,17 +120,14 @@ class BillingService:
                 currency="RUB",
                 status=InvoiceStatus.PENDING,
                 attempt_no=attempt_no,
-                due_at=now,  # due сейчас
+                due_at=now,
                 paid_at=None,
                 idempotency_key=idempotency_key,
             )
             db.add(invoice)
             db.flush()
 
-        tx = db.execute(
-            select(Transaction).where(Transaction.idempotency_key == idempotency_key)
-        ).scalar_one_or_none()
-
+        tx = db.execute(select(Transaction).where(Transaction.idempotency_key == idempotency_key)).scalar_one_or_none()
         if not tx:
             tx = Transaction(
                 user_id=sub.user_id,
@@ -138,7 +143,7 @@ class BillingService:
             db.add(tx)
             db.flush()
 
-        # 6) попытка списания
+        # попытка списания
         try:
             res = self.gateway.charge(
                 token_ref=pm.token_ref,
@@ -150,9 +155,6 @@ class BillingService:
 
         except PaymentTemporaryUnavailable as e:
             retry_at = self._compute_retry_at(attempt_no)
-
-            # В твоей модели нет InvoiceStatus.RETRY:
-            # значит ретрай = оставить PENDING, но перенести due_at в будущее
             invoice.status = InvoiceStatus.PENDING
             invoice.due_at = retry_at
 
@@ -184,14 +186,14 @@ class BillingService:
             sub.status = SubscriptionStatus.PAST_DUE
             return BillingResult(False, "DECLINED", invoice.id, tx.id, None, str(e))
 
-        # 7) успех
+        # успех
         invoice.status = InvoiceStatus.PAID
         invoice.paid_at = now_utc()
 
         tx.status = TransactionStatus.SUCCEEDED
         tx.provider_payment_id = res.provider_payment_id
 
-        # продлеваем период
+        # ✅ продлеваем период (или начинаем платный после trial) ТОЛЬКО ПОСЛЕ УСПЕШНОЙ ОПЛАТЫ
         start = now_utc()
         sub.current_period_start = start
         sub.current_period_end = add_period(start, plan.period)

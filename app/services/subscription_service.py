@@ -1,15 +1,21 @@
 # services/subscription_service.py
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from models.user import User
+from app.utils.json_utils import json_dumps
 from models.plan import Plan, BillingPeriod
 from models.subscription import Subscription, SubscriptionStatus
+
+from models.notification import NotificationType, NotificationChannel
+from services.notification_service import NotificationService
+from services.billing_service import BillingService
+from payments.fake_gateway import FakePaymentGateway, FakeGatewayConfig
 
 
 class SubscriptionError(Exception):
@@ -60,7 +66,7 @@ class SubscriptionService:
     - create
     - cancel (end of period / immediately)
     - change plan (next period / immediately)
-    - expire trial/period (это удобно делать из scheduled task)
+    - time-based transitions (только отмена по cancel_at; никаких "trial->active" без оплаты)
     """
 
     # ---------- Create ----------
@@ -74,13 +80,14 @@ class SubscriptionService:
         start_at: datetime | None = None,
     ) -> CreateSubscriptionResult:
         start_at = start_at or utcnow()
+        if start_at.tzinfo is None:
+            start_at = start_at.replace(tzinfo=timezone.utc)
 
         plan: Plan | None = db.get(Plan, plan_id)
         if not plan or not plan.is_active:
             raise PlanNotAvailable("Plan not found or inactive")
 
-        # Блокируем "активную подписку пользователя" от гонок:
-        # если два запроса одновременно — один дождётся.
+        # блокируем активную подписку пользователя от гонок
         existing_active = db.execute(
             select(Subscription)
             .where(
@@ -93,7 +100,7 @@ class SubscriptionService:
         if existing_active:
             raise ActiveSubscriptionExists("User already has an active subscription")
 
-        # Trial: если trial_days > 0 => статус TRIAL и period_end = start + trial_days
+        # trial или активная сразу
         if plan.trial_days and plan.trial_days > 0:
             status = SubscriptionStatus.TRIAL
             period_start = start_at
@@ -116,7 +123,41 @@ class SubscriptionService:
 
         db.add(sub)
         db.flush()
+        # --- immediate charge: если нет trial, пытаемся списать сразу ---
+        immediate_payment_attempted = False
+        if status == SubscriptionStatus.ACTIVE and (not plan.trial_days or plan.trial_days <= 0):
+            immediate_payment_attempted = True
 
+            # делаем подписку 'due now', чтобы BillingService выполнил попытку списания немедленно
+            sub.current_period_end = start_at
+
+            gateway = FakePaymentGateway(
+                FakeGatewayConfig(p_success=0.80, p_insufficient=0.10, p_unavailable=0.05, p_declined=0.05)
+            )
+            billing = BillingService(gateway=gateway)
+            billing_result = billing.charge_subscription(db, subscription_id=sub.id)
+
+            # если оплата не прошла — шлём уведомление (и оставляем ретраи на billing_tasks)
+            if not billing_result.ok:
+                NotificationService().enqueue_payment_failed(
+                    db,
+                    user_id=user_id,
+                    plan_name=plan.name,
+                    reason=billing_result.status,
+                    retry_at=billing_result.retry_at,
+                    when=start_at,
+                    scheduled_at=None,
+                    dedupe=False,
+                )
+
+
+        # ✅ СРАЗУ после оформления — уведомление "подписка оформлена"
+        NotificationService().enqueue_subscription_created(
+            db,
+            user_id=user_id,
+            plan_name=plan.name,
+            when=start_at,
+        )
         return CreateSubscriptionResult(
             subscription_id=str(sub.id),
             status=sub.status,
@@ -129,6 +170,8 @@ class SubscriptionService:
 
     def cancel_at_period_end(self, db: Session, *, subscription_id, when: datetime | None = None) -> Subscription:
         when = when or utcnow()
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
 
         sub: Subscription | None = db.execute(
             select(Subscription).where(Subscription.id == subscription_id).with_for_update()
@@ -141,10 +184,20 @@ class SubscriptionService:
 
         # выставляем cancel_at = конец текущего периода
         sub.mark_canceled(when=when)
+
+        # ✅ уведомление "подписка отменена" (факт отмены пользователем, даже если действует до конца периода)
+        NotificationService().enqueue_subscription_canceled(
+            db,
+            user_id=sub.user_id,
+            plan_name=None,
+            when=when,
+        )
         return sub
 
     def cancel_immediately(self, db: Session, *, subscription_id, when: datetime | None = None) -> Subscription:
         when = when or utcnow()
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
 
         sub: Subscription | None = db.execute(
             select(Subscription).where(Subscription.id == subscription_id).with_for_update()
@@ -159,17 +212,18 @@ class SubscriptionService:
         sub.cancel_at = when
         sub.current_period_end = when
         sub.status = SubscriptionStatus.CANCELED
+
+        NotificationService().enqueue_subscription_canceled(
+            db,
+            user_id=sub.user_id,
+            plan_name=None,
+            when=when,
+        )
         return sub
 
     # ---------- Change plan ----------
 
     def change_plan_next_period(self, db: Session, *, subscription_id, new_plan_id) -> Subscription:
-        """
-        Упрощённо: смена тарифа со следующего периода.
-        Для зачёта ок. Для прод — нужно хранить pending_plan_id.
-        Тут делаем так: если подписка уже due/закончилась — меняем сразу, иначе отменяем в конце периода
-        и создаём новую подписку на новый план со стартом = current_period_end (можно scheduled task).
-        """
         sub: Subscription | None = db.execute(
             select(Subscription).where(Subscription.id == subscription_id).with_for_update()
         ).scalar_one_or_none()
@@ -180,8 +234,8 @@ class SubscriptionService:
         if not new_plan or not new_plan.is_active:
             raise PlanNotAvailable("New plan not found or inactive")
 
-        # Если уже почти закончилось/просрочено — меняем сразу
         now = utcnow()
+
         if now >= sub.current_period_end:
             sub.plan_id = new_plan_id
             sub.status = SubscriptionStatus.ACTIVE
@@ -191,18 +245,10 @@ class SubscriptionService:
             sub.canceled_at = None
             return sub
 
-        # Иначе — ставим отмену в конце периода, а создание новой подписки делай task'ом
-        # (или можно вернуть клиенту информацию "смена будет применена тогда-то")
         sub.mark_canceled(when=now)
         return sub
 
     def change_plan_immediately(self, db: Session, *, subscription_id, new_plan_id) -> Subscription:
-        """
-        Немедленная смена тарифа:
-        - закрываем старый период сейчас
-        - меняем plan_id
-        - стартуем новый период сейчас
-        """
         sub: Subscription | None = db.execute(
             select(Subscription).where(Subscription.id == subscription_id).with_for_update()
         ).scalar_one_or_none()
@@ -223,16 +269,18 @@ class SubscriptionService:
         sub.canceled_at = None
         return sub
 
-    # ---------- Expire helpers (for scheduled tasks) ----------
+    # ---------- Time-based transitions ----------
 
     def apply_time_based_transitions(self, db: Session, *, subscription_id, now: datetime | None = None) -> Subscription:
         """
-        Полезно вызывать из scheduled task:
-        - если подписка была TRIAL и trial закончился => ACTIVE (если не отменена)
-        - если cancel_at наступил => CANCELED
-        - если период закончился и подписка не оплачена => PAST_DUE / EXPIRED (тут лучше делегировать BillingService)
+        ВАЖНО: здесь НЕ делаем trial->active и НЕ продлеваем период.
+        Этим занимается BillingService строго в момент current_period_end.
+        Здесь только:
+        - отмена по cancel_at
         """
         now = now or utcnow()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
 
         sub: Subscription | None = db.execute(
             select(Subscription).where(Subscription.id == subscription_id).with_for_update()
@@ -240,24 +288,12 @@ class SubscriptionService:
         if not sub:
             raise SubscriptionNotFound("Subscription not found")
 
-        # отмена по расписанию
+        # отмена по расписанию (в конце периода)
         if sub.cancel_at and now >= sub.cancel_at and sub.status in (SubscriptionStatus.TRIAL, SubscriptionStatus.ACTIVE):
             sub.status = SubscriptionStatus.CANCELED
             if not sub.canceled_at:
                 sub.canceled_at = now
             sub.current_period_end = min(sub.current_period_end, now)
             return sub
-
-        # trial -> active (переход периода оплаты будет делаться биллингом)
-        if sub.status == SubscriptionStatus.TRIAL and now >= sub.current_period_end:
-            # trial закончился: либо сразу делаем ACTIVE (и дальше биллинг)
-            sub.status = SubscriptionStatus.ACTIVE
-            sub.current_period_start = now
-            plan: Plan | None = db.get(Plan, sub.plan_id)
-            if plan:
-                sub.current_period_end = add_period(now, plan.period)
-            else:
-                # если план удалён/не найден — истекаем
-                sub.status = SubscriptionStatus.EXPIRED
 
         return sub

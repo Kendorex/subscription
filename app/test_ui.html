@@ -172,17 +172,27 @@
     <hr />
 
     <section>
-      <h3>5) Admin: симуляция автопродления</h3>
+      <h3>5) Admin: автопродление (ручной запуск / симуляция)</h3>
       <p>
         limit <input id="adminLimit" value="50" />
-        <button id="btnRunBilling">POST /admin/billing/run-due</button>
-        <button id="btnSendNotif">POST /admin/notifications/send-due</button>
+        <button id="btnRunBilling">POST /admin/billing/run-due (и send-due)</button>
       </p>
+
       <p>
-        <button id="btnSimulateRenewalFlow">
-          Симулировать “автопродление”: run-due → обновить мои подписки
+        <button id="btnSimulateRenewalV2">
+          Симуляция автопродления (FORCE DUE для выбранной подписки)
         </button>
       </p>
+
+      <details>
+        <summary><b>Что нужно на backend для кнопки FORCE DUE</b></summary>
+        <p>
+          Кнопка вызывает:
+          <code>POST /admin/subscriptions/&lt;sub_id&gt;/simulate-renewal</code>
+          (admin-only). Этот endpoint должен сделать подписку due (current_period_end=now),
+          затем запустить биллинг и отправку уведомлений.
+        </p>
+      </details>
     </section>
 
     <hr />
@@ -285,6 +295,15 @@
         log(pretty(data));
         log("--------------------------------------------------");
         return { status: res.status, data };
+      }
+
+      // ✅ DEV helper: immediately send due notifications after actions
+      async function sendDueNotificationsDev(limit = 200) {
+        return await request(
+          "POST",
+          `/admin/notifications/send-due?limit=${encodeURIComponent(limit)}`,
+          { asAdmin: true }
+        );
       }
 
       // ---------------- DEV helpers ----------------
@@ -572,18 +591,36 @@
         await loadSubs();
       });
 
+      // ✅ Subscribe: after success, auto send notifications
       el("btnSubscribe").addEventListener("click", async () => {
         const planId = el("selectedPlanId").value.trim();
         if (!planId) return log("Выбери plan_id");
-        await request("POST", "/subscriptions", { body: { plan_id: planId } });
+
+        const r = await request("POST", "/subscriptions", { body: { plan_id: planId } });
         await loadSubs();
+
+        if (r.status >= 200 && r.status < 300) {
+          await sendDueNotificationsDev(200);
+          log("OK: уведомление 'подписка оформлена' отправлено (send-due).");
+        } else {
+          log("WARN: подписка не оформлена — уведомления не отправляю.");
+        }
       });
 
+      // ✅ Cancel: after success, auto send notifications
       el("btnCancelSub").addEventListener("click", async () => {
         const subId = el("subCancelId").value.trim();
         if (!subId) return log("Введите sub_id");
-        await request("POST", `/subscriptions/${encodeURIComponent(subId)}/cancel`);
+
+        const r = await request("POST", `/subscriptions/${encodeURIComponent(subId)}/cancel`);
         await loadSubs();
+
+        if (r.status >= 200 && r.status < 300) {
+          await sendDueNotificationsDev(200);
+          log("OK: уведомление 'подписка отменена' отправлено (send-due).");
+        } else {
+          log("WARN: отмена не прошла — уведомления не отправляю.");
+        }
       });
 
       el("btnExplainRenewal").addEventListener("click", () => {
@@ -597,54 +634,42 @@
           cachedSubs[0];
 
         const status = active.status ?? active.state ?? "(?)";
-        const currentPeriodEnd = fmtDateMaybe(active.current_period_end ?? active.period_end ?? active.currentPeriodEnd);
-        const nextBillingAt = fmtDateMaybe(active.next_billing_at ?? active.nextBillingAt ?? active.renew_at ?? active.next_charge_at);
-
-        const cancelAtPeriodEnd =
-          active.cancel_at_period_end ?? active.cancelAtPeriodEnd ?? null;
-
-        const autoRenew =
-          active.auto_renew ??
-          active.autoRenew ??
-          (cancelAtPeriodEnd !== null ? !cancelAtPeriodEnd : null);
+        const currentPeriodEnd = fmtDateMaybe(
+          active.current_period_end ?? active.period_end ?? active.currentPeriodEnd
+        );
 
         log("=== Как будет продлена подписка (по данным API) ===");
         log(`status: ${status}`);
-        if (autoRenew === null) log("auto_renew: (нет поля в ответе)");
-        else log(`auto_renew: ${autoRenew}`);
-
-        if (currentPeriodEnd) log(`current_period_end: ${currentPeriodEnd}`);
-        else log("current_period_end: (нет поля в ответе)");
-
-        if (nextBillingAt) log(`next_billing_at: ${nextBillingAt}`);
-        else log("next_billing_at: (нет поля в ответе)");
-
-        if (autoRenew === false) {
-          log("Итог: автопродления не будет (подписка должна закончиться в конце периода).");
-        } else if (autoRenew === true) {
-          log("Итог: при наступлении next_billing_at система попытается списать и продлить период.");
-        } else {
-          log("Итог: не могу точно сказать — добавь в ответ API поля auto_renew/cancel_at_period_end/next_billing_at.");
-        }
+        log(`current_period_end: ${currentPeriodEnd ?? "(нет поля)"}`);
+        log("Подсказка: автопродление произойдёт, когда current_period_end <= now, и будет успешная оплата.");
         log("==================================================");
       });
 
+      // ✅ Admin run-billing: after run-due, auto send-due
       el("btnRunBilling").addEventListener("click", async () => {
         const limit = Number(el("adminLimit").value || "50");
-        await request("POST", `/admin/billing/run-due?limit=${encodeURIComponent(limit)}`, { asAdmin: true });
-      });
 
-      el("btnSendNotif").addEventListener("click", async () => {
-        const limit = Number(el("adminLimit").value || "50");
+        await request("POST", `/admin/billing/run-due?limit=${encodeURIComponent(limit)}`, { asAdmin: true });
         await request("POST", `/admin/notifications/send-due?limit=${encodeURIComponent(limit)}`, { asAdmin: true });
+
+        log("OK: run-due → send-due");
       });
 
-      el("btnSimulateRenewalFlow").addEventListener("click", async () => {
-        const limit = Number(el("adminLimit").value || "50");
-        log("Сценарий: admin run-due → refresh my subs");
-        await request("POST", `/admin/billing/run-due?limit=${encodeURIComponent(limit)}`, { asAdmin: true });
+      // ✅ V2: FORCE DUE (requires backend endpoint)
+      el("btnSimulateRenewalV2").addEventListener("click", async () => {
+        const subId = el("subCancelId").value.trim();
+        if (!subId) return log("Введите sub_id (вставь из списка подписок)");
+
+        log("Симуляция автопродления (FORCE DUE) — вызов admin endpoint");
+
+        await request(
+          "POST",
+          `/admin/subscriptions/${encodeURIComponent(subId)}/simulate-renewal`,
+          { asAdmin: true }
+        );
+
         await loadSubs();
-        log("Готово: обновил мои подписки после run-due.");
+        log("Готово: simulate-renewal → обновил мои подписки.");
       });
 
       // ---- initial hint
@@ -653,9 +678,8 @@
       log("2) 'Добавить метод оплаты' (если нет)");
       log("3) 'Загрузить планы' → выбрать plan_id");
       log("4) 'Оформить подписку'");
-      log("5) 'Показать, как будет продлена'");
-      log("6) Под admin: 'Симулировать автопродление'");
-      log("Важно: для кастомного email нужен /dev/register, иначе будет Unknown user.");
+      log("5) Вставь sub_id из списка → 'Симуляция автопродления (FORCE DUE)'");
+      log("Важно: FORCE DUE работает только если на backend есть /admin/subscriptions/{id}/simulate-renewal.");
       log("--------------------------------------------------");
     </script>
   </body>

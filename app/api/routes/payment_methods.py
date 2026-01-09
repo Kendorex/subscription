@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select, update
@@ -30,7 +30,7 @@ def add_method(payload: PaymentMethodCreate, db: Session = Depends(get_db), user
     return pm
 
 @router.post("/{pm_id}/make-default", response_model=PaymentMethodOut)
-def make_default(pm_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def make_default(pm_id: UUID, db: Session = Depends(get_db), user=Depends(get_current_user)):
     pm = db.get(PaymentMethod, pm_id)
     if not pm or pm.user_id != user.id:
         raise HTTPException(404, "Payment method not found")

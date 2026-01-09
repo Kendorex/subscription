@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
+from app.services.notification_service import NotificationService
 from db import get_db
 from models.subscription import Subscription, SubscriptionStatus
 from models.plan import Plan
@@ -21,7 +22,11 @@ def my_subscriptions(db: Session = Depends(get_db), user=Depends(get_current_use
     return db.execute(select(Subscription).where(Subscription.user_id == user.id)).scalars().all()
 
 @router.post("", response_model=SubscriptionOut)
-def create_subscription(payload: SubscriptionCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def create_subscription(
+    payload: SubscriptionCreate,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
     plan = db.get(Plan, payload.plan_id)
     if not plan or not plan.is_active:
         raise HTTPException(400, "Plan is inactive or not found")
@@ -30,20 +35,23 @@ def create_subscription(payload: SubscriptionCreate, db: Session = Depends(get_d
     active = db.execute(
         select(Subscription).where(
             Subscription.user_id == user.id,
-            Subscription.status.in_([SubscriptionStatus.TRIAL, SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE]),
+            Subscription.status.in_(
+                [SubscriptionStatus.TRIAL, SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE]
+            ),
         )
     ).scalar_one_or_none()
     if active:
         raise HTTPException(409, "User already has an active subscription")
 
     start = now_utc()
+
     # trial: если trial_days > 0
     if plan.trial_days and plan.trial_days > 0:
         status = SubscriptionStatus.TRIAL
         period_end = start + timedelta(days=int(plan.trial_days))
     else:
         status = SubscriptionStatus.ACTIVE
-        period_end = start  # сразу due -> будет списание на следующем биллинге (или можно выставить +30/365)
+        period_end = start  # сразу due
 
     sub = Subscription(
         user_id=user.id,
@@ -53,15 +61,46 @@ def create_subscription(payload: SubscriptionCreate, db: Session = Depends(get_d
         current_period_start=start,
         current_period_end=period_end,
     )
+
     db.add(sub)
-    db.flush()
+    db.flush()  # ← важно: sub.id уже есть
+
+    # ✅ EMAIL: "подписка оформлена"
+    NotificationService().enqueue_subscription_created(
+        db,
+        user_id=sub.user_id,
+        plan_name=plan.name,
+        when=start,
+    )
+
     return sub
+
 
 @router.post("/{sub_id}/cancel", response_model=SubscriptionOut)
 def cancel_subscription(sub_id: str, db: Session = Depends(get_db), user=Depends(get_current_user)):
     sub = db.get(Subscription, sub_id)
     if not sub or sub.user_id != user.id:
         raise HTTPException(404, "Subscription not found")
+
+    # можно сделать идемпотентно
+    if sub.status == SubscriptionStatus.CANCELED:
+        return sub
+
     sub.status = SubscriptionStatus.CANCELED
+    sub.canceled_at = now_utc()
+    sub.cancel_at = now_utc()
+    sub.current_period_end = min(sub.current_period_end, sub.cancel_at) if sub.current_period_end else sub.cancel_at
+
+    plan = db.get(Plan, sub.plan_id)
+    plan_name = plan.name if plan else "Unknown"
+
+   
+    NotificationService().enqueue_subscription_canceled(
+        db,
+        user_id=sub.user_id,
+        plan_name=plan_name,
+        when=now_utc(),
+    )
+
     db.flush()
     return sub

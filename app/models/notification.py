@@ -19,7 +19,11 @@ from db import Base
 class NotificationType(str, Enum):
     PAYMENT_OK = "payment_ok"
     PAYMENT_FAIL = "payment_fail"
+
+    SUBSCRIPTION_CREATED = "subscription_created"
+    SUBSCRIPTION_RENEWED = "subscription_renewed"
     SUBSCRIPTION_CANCELED = "subscription_canceled"
+
     TRIAL_ENDING = "trial_ending"
     PAST_DUE = "past_due"
 

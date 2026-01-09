@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+load_dotenv()
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.routes.plans import router as plans_router, admin_router as admin_plans_router
@@ -10,7 +12,7 @@ app = FastAPI(title="Subscription MVP")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # для теста
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

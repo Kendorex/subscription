@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from dotenv import load_dotenv
+
+from utils.json_utils import json_dumps
 load_dotenv()
 
 import os
@@ -64,7 +66,11 @@ def _get_database_url() -> str:
 
 DATABASE_URL = _get_database_url()
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
+engine = create_engine(
+    DATABASE_URL,
+    future=True,
+    json_serializer=lambda obj: json_dumps(obj, ensure_ascii=False),  # ✅
+)
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
