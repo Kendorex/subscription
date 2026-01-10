@@ -4,277 +4,451 @@
     <meta charset="utf-8" />
     <title>Subscription UI (mini-cabinet)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="styles.css" />
   </head>
 
   <body>
-    <h2>Личный кабинет подписки (MVP, без CSS)</h2>
+    <header class="topbar">
+      <div class="container topbar__inner">
+        <div class="brand">
+          <div class="brand__logo" aria-hidden="true">S</div>
+          <div>
+            <h1 class="brand__title">Личный кабинет подписки</h1>
+            <p class="brand__subtitle">MVP / тестовый интерфейс</p>
+          </div>
+        </div>
 
-    <section>
-      <p>
-        <b>Base URL:</b>
-        <input id="baseUrl" type="text" value="http://127.0.0.1:8000" size="40" />
-        <button id="btnPing">Проверить API (GET /plans)</button>
-      </p>
-    </section>
-
-    <hr />
-
-    <section>
-      <h3>1) Пользователь</h3>
-
-      <p>
-        <b>Быстрый выбор:</b>
-        <button class="btnUser" data-email="alice@example.com">Alice</button>
-        <button class="btnUser" data-email="bob@example.com">Bob</button>
-        <button class="btnUser" data-email="admin@example.com">Admin (как user)</button>
-      </p>
-
-      <p>
-        <b>Или свой email:</b>
-        <input id="customEmail" type="text" placeholder="например ivan@example.com" size="30" />
-        <button id="btnUseCustom">Использовать этот email</button>
-        <button id="btnDevRegisterAndUseCustom">DEV: создать пользователя и использовать</button>
-      </p>
-
-      <p>
-        <b>Текущий пользователь (X-User-Email):</b>
-        <span id="activeEmail"></span>
-      </p>
-
-      <p>
-        <b>Admin email (для /admin/*):</b>
-        <input id="adminEmail" type="text" value="admin@example.com" size="30" />
-        <button id="btnUseAdminEmail">Использовать как Admin</button>
-        <span id="activeAdmin"></span>
-      </p>
-
-      <details>
-        <summary><b>DEV-инструменты</b></summary>
-        <p>
-          роль
-          <select id="devRole">
-            <option value="user">user</option>
-            <option value="admin">admin</option>
-          </select>
-
-          пароль (dev, опционально)
-          <input id="devPassword" placeholder="любая строка" size="25" />
-
-          <button id="btnDevRegister">DEV: создать/обновить текущего пользователя</button>
-          <button id="btnDevWhoami">DEV: проверить пользователя</button>
-        </p>
-        <p>
-          <small>
-            Использует /dev/register и /dev/whoami. Пароль — чтобы заполнить NOT NULL password_hash.
-          </small>
-        </p>
-      </details>
-
-      <p>
-        <button id="btnRefreshAll">Обновить всё (планы + карта + баланс + подписки)</button>
-      </p>
-    </section>
-
-    <hr />
-
-    <section>
-      <h3>2) Тарифы</h3>
-
-      <p>
-        <button id="btnLoadPlans">Показать тарифы</button>
-        <button id="btnPromoToggle" disabled>Промокод</button>
-      </p>
-
-      <!-- UI промокода (появляется по кнопке) -->
-      <div id="promoBox" style="display:none; border:1px dashed #aaa; padding:8px; margin:8px 0;">
-        <b>Введите промокод:</b>
-        <input id="promoInput" placeholder="любой текст" size="30" />
-        <button id="btnApplyPromo">Применить</button>
-        <button id="btnPromoHide">Скрыть</button>
-        <div><small id="promoHint"></small></div>
+        <div class="topbar__pills">
+          <div class="pill">
+            <span class="pill__label">User</span>
+            <span id="activeEmail" class="pill__value"></span>
+          </div>
+          <div class="pill pill--muted">
+            <span class="pill__label">Admin</span>
+            <span id="activeAdmin" class="pill__value"></span>
+          </div>
+        </div>
       </div>
+    </header>
 
-      <div>
-        <b>Доступные тарифы:</b>
-        <div id="plansBox"></div>
+    <main class="container grid">
+      <section class="card">
+        <div class="card__header">
+          <h2 class="card__title">Подключение</h2>
+          <p class="card__hint">Base URL и быстрый ping.</p>
+        </div>
+
+        <div class="card__body">
+          <div class="row row--wrap">
+            <label class="field field--grow">
+              <span class="field__label">Base URL</span>
+              <div class="field__inline">
+                <input id="baseUrl" class="input" type="text" value="http://127.0.0.1:8000" />
+                <button class="btn btn--ghost" type="button" data-copy="#baseUrl">Копировать</button>
+              </div>
+            </label>
+
+            <div class="actions">
+              <button id="btnPing" class="btn btn--primary">Проверить API (GET /plans)</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card__header">
+          <h2 class="card__title">1) Пользователь</h2>
+          <p class="card__hint">Переключай X-User-Email и admin email.</p>
+        </div>
+
+        <div class="card__body">
+          <div class="block">
+            <div class="block__title">Быстрый выбор</div>
+            <div class="btnbar">
+              <button class="btn btn--ghost btnUser" data-email="alice@example.com">Alice</button>
+              <button class="btn btn--ghost btnUser" data-email="bob@example.com">Bob</button>
+              <button class="btn btn--ghost btnUser" data-email="admin@example.com">Admin (как user)</button>
+            </div>
+          </div>
+
+          <div class="spacer"></div>
+
+          <div class="block">
+            <div class="block__title">Или свой email</div>
+            <div class="row row--tight row--wrap">
+              <input id="customEmail" class="input" type="text" placeholder="например ivan@example.com" />
+              <button id="btnUseCustom" class="btn">Использовать</button>
+              <button id="btnDevRegisterAndUseCustom" class="btn btn--primary">DEV: создать и использовать</button>
+            </div>
+          </div>
+
+          <div class="spacer"></div>
+
+          <div class="row row--tight row--wrap">
+            <label class="field field--grow">
+              <span class="field__label">Admin email (для /admin/*)</span>
+              <div class="field__inline">
+                <input id="adminEmail" class="input" type="text" value="admin@example.com" />
+                <button id="btnUseAdminEmail" class="btn">Использовать как Admin</button>
+              </div>
+            </label>
+
+            <button id="btnRefreshAll" class="btn btn--primary btn--wide">
+              Обновить всё (планы + карта + баланс + подписки)
+            </button>
+          </div>
+
+          <details class="details">
+            <summary class="details__summary">
+              <span>DEV-инструменты</span>
+              <span class="details__chev" aria-hidden="true">▾</span>
+            </summary>
+            <div class="details__body">
+              <div class="row row--wrap">
+                <label class="field">
+                  <span class="field__label">роль</span>
+                  <select id="devRole" class="select">
+                    <option value="user">user</option>
+                    <option value="admin">admin</option>
+                  </select>
+                </label>
+
+                <label class="field field--grow">
+                  <span class="field__label">пароль (dev, опционально)</span>
+                  <input id="devPassword" class="input" placeholder="любая строка" />
+                </label>
+
+                <div class="actions">
+                  <button id="btnDevRegister" class="btn btn--primary">DEV: создать/обновить</button>
+                  <button id="btnDevWhoami" class="btn">DEV: whoami</button>
+                </div>
+              </div>
+
+              <p class="muted">
+                Использует /dev/register и /dev/whoami. Пароль — чтобы заполнить NOT NULL password_hash.
+              </p>
+            </div>
+          </details>
+        </div>
+      </section>
+      <section class="card">
+        <div class="card__header">
+          <h2 class="card__title">2) Тарифы</h2>
+          <p class="card__hint">Загрузка планов + промокод (если доступно).</p>
+        </div>
+
+        <div class="card__body">
+          <div class="row row--wrap">
+            <div class="actions">
+              <button id="btnLoadPlans" class="btn btn--primary">Показать тарифы</button>
+              <button id="btnPromoToggle" class="btn" disabled>Промокод</button>
+            </div>
+
+            <label class="field field--grow">
+              <span class="field__label">Выбранный plan_id</span>
+              <div class="field__inline">
+                <input id="selectedPlanId" class="input" placeholder="кликни по тарифу или вставь сюда" />
+                <button class="btn btn--ghost" type="button" data-copy="#selectedPlanId">Копировать</button>
+              </div>
+            </label>
+          </div>
+
+          <div id="promoBox" class="promo" style="display:none;">
+            <div class="promo__title">Введите промокод</div>
+            <div class="row row--tight row--wrap">
+              <input id="promoInput" class="input" placeholder="любой текст" />
+              <button id="btnApplyPromo" class="btn btn--primary">Применить</button>
+              <button id="btnPromoHide" class="btn">Скрыть</button>
+            </div>
+            <div class="promo__hint"><small id="promoHint"></small></div>
+          </div>
+
+          <div class="subheader">
+            <div class="subheader__title">Доступные тарифы</div>
+            <div class="subheader__right muted">клик по кнопке → заполнит plan_id</div>
+          </div>
+          <div id="plansBox" class="listbox"></div>
+
+          <details class="details">
+            <summary class="details__summary">
+              <span>Admin: создать тариф</span>
+              <span class="details__chev" aria-hidden="true">▾</span>
+            </summary>
+
+            <div class="details__body">
+              <div class="row row--wrap">
+                <label class="field">
+                  <span class="field__label">name</span>
+                  <input id="planName" class="input" value="Team" />
+                </label>
+
+                <label class="field">
+                  <span class="field__label">price_cents</span>
+                  <input id="planPrice" class="input" value="199900" />
+                </label>
+
+                <label class="field">
+                  <span class="field__label">period</span>
+                  <select id="planPeriod" class="select">
+                    <option value="month">month</option>
+                    <option value="year">year</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span class="field__label">trial_days</span>
+                  <input id="planTrial" class="input" value="7" />
+                </label>
+
+                <div class="actions">
+                  <button id="btnCreatePlan" class="btn btn--primary">Создать тариф</button>
+                </div>
+              </div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card__header">
+          <h2 class="card__title">3) Способ оплаты</h2>
+          <p class="card__hint">Режим влияет на оформление/продление.</p>
+        </div>
+
+        <div class="card__body">
+          <div class="radio-group">
+            <label class="radio">
+              <input type="radio" name="payMode" id="payModeBalance" checked />
+              <span>Оплатить с баланса</span>
+            </label>
+
+            <label class="radio">
+              <input type="radio" name="payMode" id="payModeCard" />
+              <span>Оплатить картой (привязанной)</span>
+            </label>
+          </div>
+
+          <p class="muted">
+            Если выбран баланс — при нехватке средств будет ошибка “Недостаточно средств”, без попытки списания с карты.
+            Если выбрана карта — баланс не используется.
+          </p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card__header">
+          <h2 class="card__title">4) Баланс</h2>
+          <p class="card__hint">Баланс + история операций.</p>
+        </div>
+
+        <div class="card__body">
+          <div class="row row--wrap">
+            <div class="actions">
+              <button id="btnLoadBalance" class="btn btn--primary">Показать баланс</button>
+            </div>
+
+            <div class="stat">
+              <div class="stat__label">Текущий баланс</div>
+              <div class="stat__value" id="balanceLabel">(не загружено)</div>
+            </div>
+          </div>
+
+          <details class="details">
+            <summary class="details__summary">
+              <span>DEV/MVP: пополнить баланс</span>
+              <span class="details__chev" aria-hidden="true">▾</span>
+            </summary>
+
+            <div class="details__body">
+              <div class="row row--wrap">
+                <label class="field">
+                  <span class="field__label">сумма (cents)</span>
+                  <input id="topupAmount" class="input" value="50000" />
+                </label>
+
+                <label class="field field--grow">
+                  <span class="field__label">idempotency_key</span>
+                  <input id="topupKey" class="input" value="demo_topup_1" />
+                </label>
+
+                <div class="actions">
+                  <button id="btnTopup" class="btn btn--primary">Пополнить</button>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="details">
+            <summary class="details__summary">
+              <span>История операций баланса</span>
+              <span class="details__chev" aria-hidden="true">▾</span>
+            </summary>
+            <div class="details__body">
+              <div id="balanceEntriesBox" class="listbox"></div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card__header">
+          <h2 class="card__title">5) Привязанная карта</h2>
+          <p class="card__hint">Методы оплаты + default.</p>
+        </div>
+
+        <div class="card__body">
+          <div class="actions">
+            <button id="btnLoadPM" class="btn btn--primary">Показать карты</button>
+          </div>
+
+          <div class="spacer"></div>
+
+          <div class="subheader">
+            <div class="subheader__title">Карты/методы оплаты</div>
+            <div class="subheader__right muted">клик по кнопке → вставит id</div>
+          </div>
+          <div id="pmBox" class="listbox"></div>
+
+          <details class="details">
+            <summary class="details__summary">
+              <span>Привязать карту (DEV/MVP)</span>
+              <span class="details__chev" aria-hidden="true">▾</span>
+            </summary>
+
+            <div class="details__body">
+              <div class="row row--wrap">
+                <label class="field">
+                  <span class="field__label">provider</span>
+                  <input id="pmProvider" class="input" value="fake" />
+                </label>
+
+                <label class="field field--grow">
+                  <span class="field__label">token_ref</span>
+                  <input id="pmToken" class="input" value="tok_test_001" />
+                </label>
+
+                <label class="field">
+                  <span class="field__label">сделать основной?</span>
+                  <select id="pmDefault" class="select">
+                    <option value="true">да</option>
+                    <option value="false">нет</option>
+                  </select>
+                </label>
+
+                <div class="actions">
+                  <button id="btnPMAdd" class="btn btn--primary">Привязать</button>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <div class="row row--wrap">
+            <label class="field field--grow">
+              <span class="field__label">Сделать основной: id</span>
+              <div class="field__inline">
+                <input id="pmIdDefault" class="input" placeholder="например 1" />
+                <button class="btn btn--ghost" type="button" data-copy="#pmIdDefault">Копировать</button>
+              </div>
+            </label>
+
+            <div class="actions">
+              <button id="btnPMMakeDefault" class="btn">Сделать основной</button>
+            </div>
+          </div>
+
+          <p class="muted">
+            Если выбран режим “Оплатить картой”, то для оплаты нужен основной (default) метод оплаты.
+          </p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card__header">
+          <h2 class="card__title">6) Подписки</h2>
+          <p class="card__hint">Оформление, список, отмена.</p>
+        </div>
+
+        <div class="card__body">
+          <div class="actions">
+            <button id="btnLoadSubs" class="btn btn--primary">Показать мои подписки</button>
+          </div>
+
+          <div class="spacer"></div>
+
+          <div class="subheader">
+            <div class="subheader__title">Мои подписки</div>
+            <div class="subheader__right muted">клик по кнопке → вставит sub_id</div>
+          </div>
+          <div id="subsBox" class="listbox"></div>
+
+          <div class="spacer"></div>
+
+          <div class="row row--wrap">
+            <div class="actions">
+              <button id="btnSubscribe" class="btn btn--primary">Оформить подписку</button>
+              <button id="btnExplainRenewal" class="btn">Пояснить автопродление</button>
+            </div>
+
+            <label class="field field--grow">
+              <span class="field__label">Отменить подписку: sub_id</span>
+              <div class="field__inline">
+                <input id="subCancelId" class="input" placeholder="вставь id подписки" />
+                <button class="btn btn--ghost" type="button" data-copy="#subCancelId">Копировать</button>
+              </div>
+            </label>
+
+            <button id="btnCancelSub" class="btn btn--danger">Отменить</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 7) Admin -->
+      <section class="card">
+        <div class="card__header">
+          <h2 class="card__title">7) Admin: тест автопродления</h2>
+          <p class="card__hint">run-due / send-due + simulate-renewal.</p>
+        </div>
+
+        <div class="card__body">
+          <div class="row row--wrap">
+            <label class="field">
+              <span class="field__label">limit</span>
+              <input id="adminLimit" class="input" value="50" />
+            </label>
+
+            <div class="actions">
+              <button id="btnRunBilling" class="btn btn--primary">
+                Запустить биллинг (run-due + send-due)
+              </button>
+              <button id="btnSimulateRenewalV2" class="btn btn--primary">
+                Симуляция автосписания
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- 8) Лог -->
+      <section class="card card--log">
+        <div class="card__header">
+          <h2 class="card__title">8) Лог</h2>
+          <p class="card__hint">Сверху — последнее событие.</p>
+        </div>
+
+        <pre id="out" class="log"></pre>
+
+        <div class="log-actions">
+          <button class="btn btn--ghost" type="button" id="btnClearLog">Очистить лог</button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container">
+        <span class="muted">UI для тестов. Вся логика запросов сохранена.</span>
       </div>
-
-      <p>
-        <b>Выбранный plan_id:</b>
-        <input id="selectedPlanId" size="50" placeholder="кликни по тарифу или вставь сюда" />
-      </p>
-
-      <details>
-        <summary><b>Admin: создать тариф</b></summary>
-        <p>
-          name <input id="planName" value="Team" />
-          price_cents <input id="planPrice" value="199900" />
-          period
-          <select id="planPeriod">
-            <option value="month">month</option>
-            <option value="year">year</option>
-          </select>
-          trial_days <input id="planTrial" value="7" />
-          <button id="btnCreatePlan">Создать тариф</button>
-        </p>
-      </details>
-    </section>
-
-    <hr />
-
-    <section>
-      <h3>3) Способ оплаты</h3>
-
-      <p>
-        <label>
-          <input type="radio" name="payMode" id="payModeBalance" checked />
-          Оплатить с баланса
-        </label>
-        &nbsp;&nbsp;
-        <label>
-          <input type="radio" name="payMode" id="payModeCard" />
-          Оплатить картой (привязанной)
-        </label>
-      </p>
-
-      <p>
-        <small>
-          Важно: режим влияет на оформление/продление. Если выбран баланс — при нехватке средств будет ошибка
-          “Недостаточно средств”, без попытки списания с карты. Если выбрана карта — баланс не используется.
-        </small>
-      </p>
-    </section>
-
-    <hr />
-
-    <section>
-      <h3>4) Баланс</h3>
-
-      <p>
-        <button id="btnLoadBalance">Показать баланс</button>
-        <button id="btnLoadBalanceEntries">Показать историю операций</button>
-      </p>
-
-      <div>
-        <b>Текущий баланс:</b>
-        <span id="balanceLabel">(не загружено)</span>
-      </div>
-
-      <details>
-        <summary><b>DEV/MVP: пополнить баланс</b></summary>
-        <p>
-          сумма (cents) <input id="topupAmount" value="50000" />
-          idempotency_key <input id="topupKey" value="demo_topup_1" size="25" />
-          <button id="btnTopup">Пополнить баланс</button>
-        </p>
-      </details>
-
-      <details>
-        <summary><b>История операций баланса</b></summary>
-        <div id="balanceEntriesBox"></div>
-      </details>
-    </section>
-
-    <hr />
-
-    <section>
-      <h3>5) Привязанная карта (методы оплаты)</h3>
-
-      <p>
-        <button id="btnLoadPM">Показать привязанные карты</button>
-      </p>
-
-      <div>
-        <b>Карты/методы оплаты:</b>
-        <div id="pmBox"></div>
-      </div>
-
-      <details>
-        <summary><b>Привязать карту (DEV/MVP)</b></summary>
-        <p>
-          provider <input id="pmProvider" value="fake" />
-          token_ref <input id="pmToken" value="tok_test_001" size="30" />
-          сделать основной?
-          <select id="pmDefault">
-            <option value="true">да</option>
-            <option value="false">нет</option>
-          </select>
-          <button id="btnPMAdd">Привязать карту</button>
-        </p>
-      </details>
-
-      <p>
-        <b>Сделать основной:</b>
-        id <input id="pmIdDefault" placeholder="например 1" />
-        <button id="btnPMMakeDefault">Сделать основной</button>
-      </p>
-
-      <p>
-        <small>
-          Если выбран режим “Оплатить картой”, то для оплаты нужен основной (default) метод оплаты.
-        </small>
-      </p>
-    </section>
-
-    <hr />
-
-    <section>
-      <h3>6) Подписки</h3>
-
-      <p>
-        <button id="btnLoadSubs">Показать мои подписки</button>
-      </p>
-
-      <div>
-        <b>Мои подписки:</b>
-        <div id="subsBox"></div>
-      </div>
-
-      <p>
-        <button id="btnSubscribe">Оформить подписку на выбранный тариф</button>
-        <button id="btnExplainRenewal">Пояснить автопродление (как сейчас настроено)</button>
-      </p>
-
-      <p>
-        <b>Отменить подписку:</b>
-        sub_id <input id="subCancelId" placeholder="вставь id подписки" size="40" />
-        <button id="btnCancelSub">Отменить</button>
-      </p>
-    </section>
-
-    <hr />
-
-    <section>
-      <h3>7) Admin: тест автопродления</h3>
-
-      <p>
-        limit <input id="adminLimit" value="50" />
-        <button id="btnRunBilling">Запустить биллинг “кто готов” (run-due + send-due)</button>
-      </p>
-
-      <p>
-        <button id="btnSimulateRenewalV2">
-          Сделать подписку “к оплате” и продлить (FORCE DUE)
-        </button>
-      </p>
-
-      <details>
-        <summary><b>Backend требование для FORCE DUE</b></summary>
-        <p>
-          Вызывает:
-          <code>POST /admin/subscriptions/&lt;sub_id&gt;/simulate-renewal</code>
-          (admin-only). Endpoint должен сделать подписку due (current_period_end=now),
-          затем запустить биллинг и отправку уведомлений.
-        </p>
-      </details>
-    </section>
-
-    <hr />
-
-    <section>
-      <h3>8) Лог</h3>
-      <pre id="out" style="white-space: pre-wrap; border: 1px solid #ccc; padding: 8px;"></pre>
-    </section>
+    </footer>
 
     <script>
       let currentEmail = "alice@example.com";
@@ -283,8 +457,6 @@
       let cachedPlans = [];
       let cachedPM = [];
       let cachedSubs = [];
-
-      // PROMO state
       let promoPlanInjected = false;
 
       const el = (id) => document.getElementById(id);
@@ -405,15 +577,7 @@
       function clearBox(node) {
         node.innerHTML = "";
       }
-
-      // ---------- PROMO helpers ----------
-      // Требуемый API: GET /users/me (пример). Должен вернуть { trial: true/false } или похожее.
-      // Если у тебя другой endpoint/поле — просто поправь в fetchTrialFlag().
       async function fetchTrialFlag() {
-        // Пытаемся несколько вариантов, чтобы не ломать текущий бекенд:
-        // 1) /users/me
-        // 2) /me
-        // 3) /dev/whoami?email=... (как запасной, если там есть trial)
         const candidates = [
           { method: "GET", path: "/users/me" },
           { method: "GET", path: "/me" },
@@ -455,11 +619,12 @@
       }
 
       function injectPromoPlanIfNeeded() {
-        // 1) Если уже есть Promo в планах с бэка — ничего не добавляем
         const exists = getPromoPlanFromAny(cachedPlans);
-        if (exists) return;
+        if (exists) {
+          promoPlanInjected = true;
+          return;
+        }
 
-        // 2) Добавляем «виртуальный» план Promo (id может не совпадать, это просто UI)
         const promoPlan = {
           id: "78d3054b-97e9-40ba-8463-988313a2ac8e",
           name: "Promo",
@@ -475,8 +640,6 @@
       function removePromoPlanIfPresent() {
         cachedPlans = (cachedPlans || []).filter((p) => String(p?.name || "").toLowerCase() !== "promo");
         promoPlanInjected = false;
-
-        // если в инпуте был выбран Promo — подчистим
         const selected = String(el("selectedPlanId").value || "");
         if (selected && selected.toLowerCase() === "78d3054b-97e9-40ba-8463-988313a2ac8e") {
           el("selectedPlanId").value = "";
@@ -496,21 +659,15 @@
       async function syncPromoAvailability() {
         const onTrial = await fetchTrialFlag();
         if (onTrial) {
-          // Если trial = true: кнопка промо заблокирована и тариф Promo исчезает
           setPromoUI({ enabled: false, reason: "Промокод недоступен: у пользователя активен trial." });
           removePromoPlanIfPresent();
           renderPlans(cachedPlans);
           return;
         }
 
-        // trial = false: промо доступно
         setPromoUI({ enabled: true, reason: "Можно ввести промокод, чтобы увидеть тариф Promo." });
-
-        // Если раньше скрывали промо — просто оставим планы как есть
         renderPlans(cachedPlans);
       }
-      // -----------------------------------
-
       function renderPlans(plans) {
         const box = el("plansBox");
         clearBox(box);
@@ -519,9 +676,18 @@
           box.textContent = "(нет тарифов)";
           return;
         }
+        const visiblePlans = (plans || []).filter((p) => {
+          const isPromo = String(p?.name || "").toLowerCase() === "promo";
+          return promoPlanInjected ? true : !isPromo;
+        });
+
+        if (!visiblePlans.length) {
+          box.textContent = "(нет тарифов)";
+          return;
+        }
 
         const ul = document.createElement("ul");
-        plans.forEach((p) => {
+        visiblePlans.forEach((p) => {
           const li = document.createElement("li");
 
           const id = p.id ?? p.plan_id ?? p.uuid ?? p.code ?? "(no-id)";
@@ -674,9 +840,9 @@
         const r = await request("GET", "/plans");
         if (r.status >= 200 && r.status < 300) {
           cachedPlans = Array.isArray(r.data) ? r.data : (r.data?.items ?? []);
-          renderPlans(cachedPlans);
+          promoPlanInjected = false;
 
-          // после загрузки планов синхронизируем доступность промо (trial flag)
+          renderPlans(cachedPlans);
           await syncPromoAvailability();
         }
       }
@@ -724,9 +890,6 @@
           currentEmail = normalizeEmail(btn.dataset.email);
           setActiveLabels();
           log(`OK: текущий пользователь = ${currentEmail}`);
-
-          // при смене пользователя: обновим trial/промо доступность (не ломая UX)
-          // если планы еще не загружали — просто попробуем выключить/включить кнопку
           await syncPromoAvailability();
         });
       });
@@ -754,8 +917,6 @@
         const r = await devRegister(currentEmail, role, password);
         if (r.status >= 200 && r.status < 300) {
           log(`DEV OK: пользователь создан/существует: ${normalizeEmail(currentEmail)}`);
-
-          // после регистрации — обновим промо доступность (trial может поменяться)
           await syncPromoAvailability();
         }
       });
@@ -805,6 +966,7 @@
         }
       });
 
+      // "Скрыть" — закрывает окно (Promo не показываем, пока не нажмут "Применить" снова)
       el("btnPromoHide").addEventListener("click", () => {
         el("promoBox").style.display = "none";
       });
@@ -820,7 +982,7 @@
           return;
         }
 
-        // Появляется тариф Promo
+        // Появляется тариф Promo (и только теперь показываем его в списке)
         injectPromoPlanIfNeeded();
         renderPlans(cachedPlans);
         el("promoHint").textContent = `OK: промокод принят (${code}). Появился тариф Promo.`;
@@ -840,10 +1002,6 @@
 
       el("btnLoadBalance").addEventListener("click", async () => {
         await loadBalance();
-      });
-
-      el("btnLoadBalanceEntries").addEventListener("click", async () => {
-        await loadBalanceEntries();
       });
 
       el("btnTopup").addEventListener("click", async () => {
@@ -1000,7 +1158,6 @@
 
       // Инициализация: сразу проверим trial-флаг и активируем/скроем промо (даже до загрузки планов)
       (async function initPromo() {
-        // кнопку промо включим после первой проверки trial
         const onTrial = await fetchTrialFlag();
         if (onTrial) {
           setPromoUI({ enabled: false, reason: "Промокод недоступен: у пользователя активен trial." });
@@ -1015,6 +1172,73 @@
       log("3) Если оплата картой — привяжи карту и сделай её основной");
       log("4) Выбери тариф → оформи подписку");
       log("--------------------------------------------------");
+
+      // ---------------------------
+      // UX ДОБАВКИ (не ломают логику)
+      // ---------------------------
+
+      // Очистка лога
+      const clearBtn = document.getElementById("btnClearLog");
+      if (clearBtn) {
+        clearBtn.addEventListener("click", () => {
+          out.textContent = "";
+        });
+      }
+
+      // Copy-to-clipboard для элементов с data-copy="#selector"
+      document.querySelectorAll("[data-copy]").forEach((b) => {
+        b.addEventListener("click", async () => {
+          const sel = b.getAttribute("data-copy");
+          const target = document.querySelector(sel);
+          if (!target) return;
+          const val = (target.value ?? target.textContent ?? "").toString();
+          try {
+            await navigator.clipboard.writeText(val);
+            log(`OK: скопировано: ${val.slice(0, 120)}`);
+          } catch {
+            log("WARN: не удалось скопировать (clipboard запрещён браузером).");
+          }
+        });
+      });
+
+      // Loading wrapper для частых кнопок (предотвращает двойные клики)
+      async function withLoading(btn, fn) {
+        const old = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "…";
+        try {
+          return await fn();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = old;
+        }
+      }
+
+      // Ничего не ломаем: просто добавим дополнительную защиту от многоклика на эти кнопки через capturing
+      ["btnRefreshAll", "btnLoadPlans", "btnLoadSubs", "btnRunBilling", "btnSubscribe"].forEach((id) => {
+        const b = el(id);
+        if (!b) return;
+        b.addEventListener(
+          "click",
+          async (e) => {
+            // если уже disabled — блокируем повтор
+            if (b.disabled) {
+              e.preventDefault();
+              e.stopPropagation();
+              return;
+            }
+            // на первый клик — временно дизейблим, потом вернём
+            const old = b.textContent;
+            b.disabled = true;
+            b.textContent = "…";
+            setTimeout(() => {
+              b.disabled = false;
+              b.textContent = old;
+            }, 1200);
+          },
+          true
+        ); // capturing: сработает раньше твоего обработчика
+      });
     </script>
   </body>
 </html>
