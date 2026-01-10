@@ -1,0 +1,1244 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>Subscription UI (mini-cabinet)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+
+  <body>
+    <header class="topbar">
+      <div class="container topbar__inner">
+        <div class="brand">
+          <div class="brand__logo" aria-hidden="true">S</div>
+          <div>
+            <h1 class="brand__title">Личный кабинет подписки</h1>
+            <p class="brand__subtitle">MVP / тестовый интерфейс</p>
+          </div>
+        </div>
+
+        <div class="topbar__pills">
+          <div class="pill">
+            <span class="pill__label">User</span>
+            <span id="activeEmail" class="pill__value"></span>
+          </div>
+          <div class="pill pill--muted">
+            <span class="pill__label">Admin</span>
+            <span id="activeAdmin" class="pill__value"></span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="container grid">
+      <section class="card">
+        <div class="card__header">
+          <h2 class="card__title">Подключение</h2>
+          <p class="card__hint">Base URL и быстрый ping.</p>
+        </div>
+
+        <div class="card__body">
+          <div class="row row--wrap">
+            <label class="field field--grow">
+              <span class="field__label">Base URL</span>
+              <div class="field__inline">
+                <input id="baseUrl" class="input" type="text" value="http://127.0.0.1:8000" />
+                <button class="btn btn--ghost" type="button" data-copy="#baseUrl">Копировать</button>
+              </div>
+            </label>
+
+            <div class="actions">
+              <button id="btnPing" class="btn btn--primary">Проверить API (GET /plans)</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card__header">
+          <h2 class="card__title">1) Пользователь</h2>
+          <p class="card__hint">Переключай X-User-Email и admin email.</p>
+        </div>
+
+        <div class="card__body">
+          <div class="block">
+            <div class="block__title">Быстрый выбор</div>
+            <div class="btnbar">
+              <button class="btn btn--ghost btnUser" data-email="alice@example.com">Alice</button>
+              <button class="btn btn--ghost btnUser" data-email="bob@example.com">Bob</button>
+              <button class="btn btn--ghost btnUser" data-email="admin@example.com">Admin (как user)</button>
+            </div>
+          </div>
+
+          <div class="spacer"></div>
+
+          <div class="block">
+            <div class="block__title">Или свой email</div>
+            <div class="row row--tight row--wrap">
+              <input id="customEmail" class="input" type="text" placeholder="например ivan@example.com" />
+              <button id="btnUseCustom" class="btn">Использовать</button>
+              <button id="btnDevRegisterAndUseCustom" class="btn btn--primary">DEV: создать и использовать</button>
+            </div>
+          </div>
+
+          <div class="spacer"></div>
+
+          <div class="row row--tight row--wrap">
+            <label class="field field--grow">
+              <span class="field__label">Admin email (для /admin/*)</span>
+              <div class="field__inline">
+                <input id="adminEmail" class="input" type="text" value="admin@example.com" />
+                <button id="btnUseAdminEmail" class="btn">Использовать как Admin</button>
+              </div>
+            </label>
+
+            <button id="btnRefreshAll" class="btn btn--primary btn--wide">
+              Обновить всё (планы + карта + баланс + подписки)
+            </button>
+          </div>
+
+          <details class="details">
+            <summary class="details__summary">
+              <span>DEV-инструменты</span>
+              <span class="details__chev" aria-hidden="true">▾</span>
+            </summary>
+            <div class="details__body">
+              <div class="row row--wrap">
+                <label class="field">
+                  <span class="field__label">роль</span>
+                  <select id="devRole" class="select">
+                    <option value="user">user</option>
+                    <option value="admin">admin</option>
+                  </select>
+                </label>
+
+                <label class="field field--grow">
+                  <span class="field__label">пароль (dev, опционально)</span>
+                  <input id="devPassword" class="input" placeholder="любая строка" />
+                </label>
+
+                <div class="actions">
+                  <button id="btnDevRegister" class="btn btn--primary">DEV: создать/обновить</button>
+                  <button id="btnDevWhoami" class="btn">DEV: whoami</button>
+                </div>
+              </div>
+
+              <p class="muted">
+                Использует /dev/register и /dev/whoami. Пароль — чтобы заполнить NOT NULL password_hash.
+              </p>
+            </div>
+          </details>
+        </div>
+      </section>
+      <section class="card">
+        <div class="card__header">
+          <h2 class="card__title">2) Тарифы</h2>
+          <p class="card__hint">Загрузка планов + промокод (если доступно).</p>
+        </div>
+
+        <div class="card__body">
+          <div class="row row--wrap">
+            <div class="actions">
+              <button id="btnLoadPlans" class="btn btn--primary">Показать тарифы</button>
+              <button id="btnPromoToggle" class="btn" disabled>Промокод</button>
+            </div>
+
+            <label class="field field--grow">
+              <span class="field__label">Выбранный plan_id</span>
+              <div class="field__inline">
+                <input id="selectedPlanId" class="input" placeholder="кликни по тарифу или вставь сюда" />
+                <button class="btn btn--ghost" type="button" data-copy="#selectedPlanId">Копировать</button>
+              </div>
+            </label>
+          </div>
+
+          <div id="promoBox" class="promo" style="display:none;">
+            <div class="promo__title">Введите промокод</div>
+            <div class="row row--tight row--wrap">
+              <input id="promoInput" class="input" placeholder="любой текст" />
+              <button id="btnApplyPromo" class="btn btn--primary">Применить</button>
+              <button id="btnPromoHide" class="btn">Скрыть</button>
+            </div>
+            <div class="promo__hint"><small id="promoHint"></small></div>
+          </div>
+
+          <div class="subheader">
+            <div class="subheader__title">Доступные тарифы</div>
+            <div class="subheader__right muted">клик по кнопке → заполнит plan_id</div>
+          </div>
+          <div id="plansBox" class="listbox"></div>
+
+          <details class="details">
+            <summary class="details__summary">
+              <span>Admin: создать тариф</span>
+              <span class="details__chev" aria-hidden="true">▾</span>
+            </summary>
+
+            <div class="details__body">
+              <div class="row row--wrap">
+                <label class="field">
+                  <span class="field__label">name</span>
+                  <input id="planName" class="input" value="Team" />
+                </label>
+
+                <label class="field">
+                  <span class="field__label">price_cents</span>
+                  <input id="planPrice" class="input" value="199900" />
+                </label>
+
+                <label class="field">
+                  <span class="field__label">period</span>
+                  <select id="planPeriod" class="select">
+                    <option value="month">month</option>
+                    <option value="year">year</option>
+                  </select>
+                </label>
+
+                <label class="field">
+                  <span class="field__label">trial_days</span>
+                  <input id="planTrial" class="input" value="7" />
+                </label>
+
+                <div class="actions">
+                  <button id="btnCreatePlan" class="btn btn--primary">Создать тариф</button>
+                </div>
+              </div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card__header">
+          <h2 class="card__title">3) Способ оплаты</h2>
+          <p class="card__hint">Режим влияет на оформление/продление.</p>
+        </div>
+
+        <div class="card__body">
+          <div class="radio-group">
+            <label class="radio">
+              <input type="radio" name="payMode" id="payModeBalance" checked />
+              <span>Оплатить с баланса</span>
+            </label>
+
+            <label class="radio">
+              <input type="radio" name="payMode" id="payModeCard" />
+              <span>Оплатить картой (привязанной)</span>
+            </label>
+          </div>
+
+          <p class="muted">
+            Если выбран баланс — при нехватке средств будет ошибка “Недостаточно средств”, без попытки списания с карты.
+            Если выбрана карта — баланс не используется.
+          </p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card__header">
+          <h2 class="card__title">4) Баланс</h2>
+          <p class="card__hint">Баланс + история операций.</p>
+        </div>
+
+        <div class="card__body">
+          <div class="row row--wrap">
+            <div class="actions">
+              <button id="btnLoadBalance" class="btn btn--primary">Показать баланс</button>
+            </div>
+
+            <div class="stat">
+              <div class="stat__label">Текущий баланс</div>
+              <div class="stat__value" id="balanceLabel">(не загружено)</div>
+            </div>
+          </div>
+
+          <details class="details">
+            <summary class="details__summary">
+              <span>DEV/MVP: пополнить баланс</span>
+              <span class="details__chev" aria-hidden="true">▾</span>
+            </summary>
+
+            <div class="details__body">
+              <div class="row row--wrap">
+                <label class="field">
+                  <span class="field__label">сумма (cents)</span>
+                  <input id="topupAmount" class="input" value="50000" />
+                </label>
+
+                <label class="field field--grow">
+                  <span class="field__label">idempotency_key</span>
+                  <input id="topupKey" class="input" value="demo_topup_1" />
+                </label>
+
+                <div class="actions">
+                  <button id="btnTopup" class="btn btn--primary">Пополнить</button>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <details class="details">
+            <summary class="details__summary">
+              <span>История операций баланса</span>
+              <span class="details__chev" aria-hidden="true">▾</span>
+            </summary>
+            <div class="details__body">
+              <div id="balanceEntriesBox" class="listbox"></div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card__header">
+          <h2 class="card__title">5) Привязанная карта</h2>
+          <p class="card__hint">Методы оплаты + default.</p>
+        </div>
+
+        <div class="card__body">
+          <div class="actions">
+            <button id="btnLoadPM" class="btn btn--primary">Показать карты</button>
+          </div>
+
+          <div class="spacer"></div>
+
+          <div class="subheader">
+            <div class="subheader__title">Карты/методы оплаты</div>
+            <div class="subheader__right muted">клик по кнопке → вставит id</div>
+          </div>
+          <div id="pmBox" class="listbox"></div>
+
+          <details class="details">
+            <summary class="details__summary">
+              <span>Привязать карту (DEV/MVP)</span>
+              <span class="details__chev" aria-hidden="true">▾</span>
+            </summary>
+
+            <div class="details__body">
+              <div class="row row--wrap">
+                <label class="field">
+                  <span class="field__label">provider</span>
+                  <input id="pmProvider" class="input" value="fake" />
+                </label>
+
+                <label class="field field--grow">
+                  <span class="field__label">token_ref</span>
+                  <input id="pmToken" class="input" value="tok_test_001" />
+                </label>
+
+                <label class="field">
+                  <span class="field__label">сделать основной?</span>
+                  <select id="pmDefault" class="select">
+                    <option value="true">да</option>
+                    <option value="false">нет</option>
+                  </select>
+                </label>
+
+                <div class="actions">
+                  <button id="btnPMAdd" class="btn btn--primary">Привязать</button>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <div class="row row--wrap">
+            <label class="field field--grow">
+              <span class="field__label">Сделать основной: id</span>
+              <div class="field__inline">
+                <input id="pmIdDefault" class="input" placeholder="например 1" />
+                <button class="btn btn--ghost" type="button" data-copy="#pmIdDefault">Копировать</button>
+              </div>
+            </label>
+
+            <div class="actions">
+              <button id="btnPMMakeDefault" class="btn">Сделать основной</button>
+            </div>
+          </div>
+
+          <p class="muted">
+            Если выбран режим “Оплатить картой”, то для оплаты нужен основной (default) метод оплаты.
+          </p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card__header">
+          <h2 class="card__title">6) Подписки</h2>
+          <p class="card__hint">Оформление, список, отмена.</p>
+        </div>
+
+        <div class="card__body">
+          <div class="actions">
+            <button id="btnLoadSubs" class="btn btn--primary">Показать мои подписки</button>
+          </div>
+
+          <div class="spacer"></div>
+
+          <div class="subheader">
+            <div class="subheader__title">Мои подписки</div>
+            <div class="subheader__right muted">клик по кнопке → вставит sub_id</div>
+          </div>
+          <div id="subsBox" class="listbox"></div>
+
+          <div class="spacer"></div>
+
+          <div class="row row--wrap">
+            <div class="actions">
+              <button id="btnSubscribe" class="btn btn--primary">Оформить подписку</button>
+              <button id="btnExplainRenewal" class="btn">Пояснить автопродление</button>
+            </div>
+
+            <label class="field field--grow">
+              <span class="field__label">Отменить подписку: sub_id</span>
+              <div class="field__inline">
+                <input id="subCancelId" class="input" placeholder="вставь id подписки" />
+                <button class="btn btn--ghost" type="button" data-copy="#subCancelId">Копировать</button>
+              </div>
+            </label>
+
+            <button id="btnCancelSub" class="btn btn--danger">Отменить</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 7) Admin -->
+      <section class="card">
+        <div class="card__header">
+          <h2 class="card__title">7) Admin: тест автопродления</h2>
+          <p class="card__hint">run-due / send-due + simulate-renewal.</p>
+        </div>
+
+        <div class="card__body">
+          <div class="row row--wrap">
+            <label class="field">
+              <span class="field__label">limit</span>
+              <input id="adminLimit" class="input" value="50" />
+            </label>
+
+            <div class="actions">
+              <button id="btnRunBilling" class="btn btn--primary">
+                Запустить биллинг (run-due + send-due)
+              </button>
+              <button id="btnSimulateRenewalV2" class="btn btn--primary">
+                Симуляция автосписания
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- 8) Лог -->
+      <section class="card card--log">
+        <div class="card__header">
+          <h2 class="card__title">8) Лог</h2>
+          <p class="card__hint">Сверху — последнее событие.</p>
+        </div>
+
+        <pre id="out" class="log"></pre>
+
+        <div class="log-actions">
+          <button class="btn btn--ghost" type="button" id="btnClearLog">Очистить лог</button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container">
+        <span class="muted">UI для тестов. Вся логика запросов сохранена.</span>
+      </div>
+    </footer>
+
+    <script>
+      let currentEmail = "alice@example.com";
+      let currentAdmin = "admin@example.com";
+
+      let cachedPlans = [];
+      let cachedPM = [];
+      let cachedSubs = [];
+      let promoPlanInjected = false;
+
+      const el = (id) => document.getElementById(id);
+      const out = el("out");
+
+      function baseUrl() {
+        return el("baseUrl").value.trim().replace(/\/+$/, "");
+      }
+
+      function log(msg) {
+        out.textContent = String(msg) + "\n" + out.textContent;
+      }
+
+      function pretty(obj) {
+        try {
+          return JSON.stringify(obj, null, 2);
+        } catch {
+          return String(obj);
+        }
+      }
+
+      function setActiveLabels() {
+        el("activeEmail").textContent = currentEmail;
+        el("activeAdmin").textContent = ` => ${currentAdmin}`;
+      }
+
+      setActiveLabels();
+
+      function normalizeEmail(v) {
+        return String(v || "").trim().toLowerCase();
+      }
+
+      function randKey(prefix = "k") {
+        return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      }
+
+      function getPayMode() {
+        return el("payModeCard").checked ? "card" : "balance";
+      }
+
+      async function request(method, path, { asAdmin = false, body = null, headersExtra = null } = {}) {
+        const url = baseUrl() + path;
+
+        const headers = {
+          "Content-Type": "application/json",
+          "X-User-Email": asAdmin ? currentAdmin : currentEmail,
+        };
+        if (headersExtra && typeof headersExtra === "object") {
+          Object.assign(headers, headersExtra);
+        }
+
+        const opts = { method, headers };
+        if (body !== null) opts.body = JSON.stringify(body);
+
+        log(`→ ${method} ${url}`);
+        log(`  X-User-Email: ${headers["X-User-Email"]}`);
+
+        const res = await fetch(url, opts);
+        const text = await res.text();
+
+        let data;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch {
+          data = text;
+        }
+
+        log(`← status ${res.status}`);
+        log(pretty(data));
+        log("--------------------------------------------------");
+        return { status: res.status, data };
+      }
+
+      async function requestRaw(method, url, { body = null } = {}) {
+        const opts = { method, headers: { "Content-Type": "application/json" } };
+        if (body !== null) opts.body = JSON.stringify(body);
+
+        log(`→ ${method} ${url}`);
+        const res = await fetch(url, opts);
+        const text = await res.text();
+
+        let data;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch {
+          data = text;
+        }
+
+        log(`← status ${res.status}`);
+        log(pretty(data));
+        log("--------------------------------------------------");
+        return { status: res.status, data };
+      }
+
+      async function sendDueNotificationsDev(limit = 200) {
+        return await request(
+          "POST",
+          `/admin/notifications/send-due?limit=${encodeURIComponent(limit)}`,
+          { asAdmin: true }
+        );
+      }
+
+      async function devRegister(email, role, password) {
+        const payload = {
+          email: normalizeEmail(email),
+          role: role || "user",
+        };
+        if (password && String(password).trim()) payload.password = String(password).trim();
+
+        return await requestRaw("POST", baseUrl() + "/dev/register", { body: payload });
+      }
+
+      async function devWhoami(email) {
+        const e = encodeURIComponent(normalizeEmail(email));
+        return await requestRaw("GET", baseUrl() + `/dev/whoami?email=${e}`);
+      }
+
+      function clearBox(node) {
+        node.innerHTML = "";
+      }
+      async function fetchTrialFlag() {
+        const candidates = [
+          { method: "GET", path: "/users/me" },
+          { method: "GET", path: "/me" },
+        ];
+
+        for (const c of candidates) {
+          try {
+            const r = await request(c.method, c.path);
+            if (r.status >= 200 && r.status < 300 && r.data) {
+              const flag =
+                r.data.trial ??
+                r.data.is_trial ??
+                r.data.has_trial ??
+                r.data.on_trial ??
+                (r.data.user ? (r.data.user.trial ?? r.data.user.is_trial) : undefined);
+
+              if (typeof flag === "boolean") return flag;
+            }
+          } catch {}
+        }
+
+        // fallback: dev/whoami (если там есть trial-атрибут)
+        try {
+          const r2 = await devWhoami(currentEmail);
+          const flag2 =
+            r2.data?.trial ??
+            r2.data?.is_trial ??
+            r2.data?.has_trial ??
+            r2.data?.on_trial;
+          if (typeof flag2 === "boolean") return flag2;
+        } catch {}
+
+        return false; // если API не найдено — считаем что trial нет, промо доступно
+      }
+
+      function getPromoPlanFromAny(plans) {
+        const p = (plans || []).find((x) => String(x?.name || "").toLowerCase() === "promo");
+        return p || null;
+      }
+
+      function injectPromoPlanIfNeeded() {
+        const exists = getPromoPlanFromAny(cachedPlans);
+        if (exists) {
+          promoPlanInjected = true;
+          return;
+        }
+
+        const promoPlan = {
+          id: "78d3054b-97e9-40ba-8463-988313a2ac8e",
+          name: "Promo",
+          price_cents: 1,
+          period: "day",
+          trial_days: 30,
+        };
+
+        cachedPlans = [promoPlan, ...cachedPlans];
+        promoPlanInjected = true;
+      }
+
+      function removePromoPlanIfPresent() {
+        cachedPlans = (cachedPlans || []).filter((p) => String(p?.name || "").toLowerCase() !== "promo");
+        promoPlanInjected = false;
+        const selected = String(el("selectedPlanId").value || "");
+        if (selected && selected.toLowerCase() === "78d3054b-97e9-40ba-8463-988313a2ac8e") {
+          el("selectedPlanId").value = "";
+        }
+      }
+
+      function setPromoUI({ enabled, reason = "" }) {
+        const btn = el("btnPromoToggle");
+        btn.disabled = !enabled;
+        el("promoHint").textContent = reason || "";
+        if (!enabled) {
+          el("promoBox").style.display = "none";
+          el("promoInput").value = "";
+        }
+      }
+
+      async function syncPromoAvailability() {
+        const onTrial = await fetchTrialFlag();
+        if (onTrial) {
+          setPromoUI({ enabled: false, reason: "Промокод недоступен: у пользователя активен trial." });
+          removePromoPlanIfPresent();
+          renderPlans(cachedPlans);
+          return;
+        }
+
+        setPromoUI({ enabled: true, reason: "Можно ввести промокод, чтобы увидеть тариф Promo." });
+        renderPlans(cachedPlans);
+      }
+      function renderPlans(plans) {
+        const box = el("plansBox");
+        clearBox(box);
+
+        if (!plans || !plans.length) {
+          box.textContent = "(нет тарифов)";
+          return;
+        }
+        const visiblePlans = (plans || []).filter((p) => {
+          const isPromo = String(p?.name || "").toLowerCase() === "promo";
+          return promoPlanInjected ? true : !isPromo;
+        });
+
+        if (!visiblePlans.length) {
+          box.textContent = "(нет тарифов)";
+          return;
+        }
+
+        const ul = document.createElement("ul");
+        visiblePlans.forEach((p) => {
+          const li = document.createElement("li");
+
+          const id = p.id ?? p.plan_id ?? p.uuid ?? p.code ?? "(no-id)";
+          const name = p.name ?? "(no-name)";
+          const price = p.price_cents ?? p.price ?? p.amount_cents ?? "(?)";
+          const period = p.period ?? p.interval ?? "(?)";
+          const trial = p.trial_days ?? p.trial ?? 0;
+
+          const btn = document.createElement("button");
+          btn.textContent = `Выбрать тариф: ${name}`;
+          btn.addEventListener("click", () => {
+            el("selectedPlanId").value = String(id);
+            log(`OK: выбран тариф plan_id = ${id} (${name})`);
+          });
+
+          const span = document.createElement("span");
+          span.textContent = `  | ${price} cents | ${period} | trial ${trial} days | id=${id}`;
+
+          li.appendChild(btn);
+          li.appendChild(span);
+          ul.appendChild(li);
+        });
+
+        box.appendChild(ul);
+      }
+
+      function renderPM(pms) {
+        const box = el("pmBox");
+        clearBox(box);
+
+        if (!pms || !pms.length) {
+          box.textContent = "(карт нет)";
+          return;
+        }
+
+        const ul = document.createElement("ul");
+        pms.forEach((pm) => {
+          const li = document.createElement("li");
+          const id = pm.id ?? pm.pm_id ?? "(no-id)";
+          const provider = pm.provider ?? "(?)";
+          const token = pm.token_ref ?? pm.token ?? "(?)";
+          const isDefault = pm.is_default ?? pm.default ?? false;
+
+          const btn = document.createElement("button");
+          btn.textContent = `Вставить id=${id}`;
+          btn.addEventListener("click", () => {
+            el("pmIdDefault").value = String(id);
+            log(`OK: выбран метод оплаты id=${id}`);
+          });
+
+          const span = document.createElement("span");
+          span.textContent = ` provider=${provider} token=${token} основной=${isDefault}`;
+
+          li.appendChild(btn);
+          li.appendChild(span);
+          ul.appendChild(li);
+        });
+
+        box.appendChild(ul);
+      }
+
+      function fmtDateMaybe(v) {
+        if (!v) return null;
+        if (typeof v === "string") return v;
+        if (typeof v === "number") {
+          const ms = v > 1e12 ? v : v * 1000;
+          return new Date(ms).toISOString();
+        }
+        return String(v);
+      }
+
+      function renderSubs(subs) {
+        const box = el("subsBox");
+        clearBox(box);
+
+        if (!subs || !subs.length) {
+          box.textContent = "(подписок нет)";
+          return;
+        }
+
+        const ul = document.createElement("ul");
+        subs.forEach((s) => {
+          const li = document.createElement("li");
+
+          const id = s.id ?? s.sub_id ?? s.uuid ?? "(no-id)";
+          const status = s.status ?? s.state ?? "(?)";
+          const planId = s.plan_id ?? s.planId ?? s.plan?.id ?? "(?)";
+
+          const currentPeriodEnd =
+            fmtDateMaybe(s.current_period_end ?? s.period_end ?? s.currentPeriodEnd);
+
+          const btn = document.createElement("button");
+          btn.textContent = `Вставить sub_id=${id}`;
+          btn.addEventListener("click", () => {
+            el("subCancelId").value = String(id);
+            log(`OK: выбран sub_id = ${id}`);
+          });
+
+          const span = document.createElement("span");
+          span.textContent =
+            ` статус=${status} plan_id=${planId}` + (currentPeriodEnd ? ` period_end=${currentPeriodEnd}` : "");
+
+          li.appendChild(btn);
+          li.appendChild(span);
+          ul.appendChild(li);
+        });
+
+        box.appendChild(ul);
+      }
+
+      function setBalanceLabel(balanceData) {
+        if (!balanceData) {
+          el("balanceLabel").textContent = "(нет данных)";
+          return;
+        }
+        const cents = balanceData.balance_cents ?? balanceData.amount_cents ?? 0;
+        const cur = balanceData.currency ?? "RUB";
+        el("balanceLabel").textContent = `${cents} cents (${cur})`;
+      }
+
+      function renderBalanceEntries(items) {
+        const box = el("balanceEntriesBox");
+        clearBox(box);
+
+        if (!items || !items.length) {
+          box.textContent = "(операций нет)";
+          return;
+        }
+
+        const ul = document.createElement("ul");
+        items.forEach((e) => {
+          const li = document.createElement("li");
+          const amount = e.amount_cents ?? 0;
+          const type = e.entry_type ?? e.type ?? "(?)";
+          const when = fmtDateMaybe(e.created_at ?? e.when ?? null) ?? "(no-date)";
+          const inv = e.related_invoice_id ?? null;
+          const sub = e.related_subscription_id ?? null;
+
+          li.textContent =
+            `${when} | ${type} | amount_cents=${amount}` +
+            (inv ? ` | invoice=${inv}` : "") +
+            (sub ? ` | sub=${sub}` : "");
+
+          ul.appendChild(li);
+        });
+        box.appendChild(ul);
+      }
+
+      async function loadPlans() {
+        const r = await request("GET", "/plans");
+        if (r.status >= 200 && r.status < 300) {
+          cachedPlans = Array.isArray(r.data) ? r.data : (r.data?.items ?? []);
+          promoPlanInjected = false;
+
+          renderPlans(cachedPlans);
+          await syncPromoAvailability();
+        }
+      }
+
+      async function loadPM() {
+        const r = await request("GET", "/payment-methods");
+        if (r.status >= 200 && r.status < 300) {
+          cachedPM = Array.isArray(r.data) ? r.data : (r.data?.items ?? []);
+          renderPM(cachedPM);
+        }
+      }
+
+      async function loadSubs() {
+        const r = await request("GET", "/subscriptions/me");
+        if (r.status >= 200 && r.status < 300) {
+          cachedSubs = Array.isArray(r.data) ? r.data : (r.data?.items ?? []);
+          renderSubs(cachedSubs);
+        }
+      }
+
+      async function loadBalance() {
+        const r = await request("GET", "/balance");
+        if (r.status >= 200 && r.status < 300) {
+          setBalanceLabel(r.data);
+        }
+      }
+
+      async function loadBalanceEntries() {
+        const r = await request("GET", "/balance/entries?limit=50");
+        if (r.status >= 200 && r.status < 300) {
+          const items = Array.isArray(r.data) ? r.data : (r.data?.items ?? []);
+          renderBalanceEntries(items);
+        }
+      }
+
+      async function refreshAll() {
+        await loadPlans();
+        await loadPM();
+        await loadBalance();
+        await loadSubs();
+      }
+
+      document.querySelectorAll(".btnUser").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          currentEmail = normalizeEmail(btn.dataset.email);
+          setActiveLabels();
+          log(`OK: текущий пользователь = ${currentEmail}`);
+          await syncPromoAvailability();
+        });
+      });
+
+      el("btnUseCustom").addEventListener("click", async () => {
+        const v = normalizeEmail(el("customEmail").value);
+        if (!v) return log("Введите email");
+        currentEmail = v;
+        setActiveLabels();
+        log(`OK: текущий пользователь = ${currentEmail}`);
+        await syncPromoAvailability();
+      });
+
+      el("btnUseAdminEmail").addEventListener("click", () => {
+        const v = normalizeEmail(el("adminEmail").value);
+        if (!v) return log("Введите admin email");
+        currentAdmin = v;
+        setActiveLabels();
+        log(`OK: admin = ${currentAdmin}`);
+      });
+
+      el("btnDevRegister").addEventListener("click", async () => {
+        const role = el("devRole").value;
+        const password = el("devPassword").value;
+        const r = await devRegister(currentEmail, role, password);
+        if (r.status >= 200 && r.status < 300) {
+          log(`DEV OK: пользователь создан/существует: ${normalizeEmail(currentEmail)}`);
+          await syncPromoAvailability();
+        }
+      });
+
+      el("btnDevWhoami").addEventListener("click", async () => {
+        const r = await devWhoami(currentEmail);
+        if (r.status === 404) log("DEV: пользователя нет в БД (сделай DEV: создать пользователя)");
+      });
+
+      el("btnDevRegisterAndUseCustom").addEventListener("click", async () => {
+        const v = normalizeEmail(el("customEmail").value);
+        if (!v) return log("Введите email в поле 'свой email'");
+        const role = el("devRole").value;
+        const password = el("devPassword").value;
+
+        const r = await devRegister(v, role, password);
+        if (r.status >= 200 && r.status < 300) {
+          currentEmail = v;
+          setActiveLabels();
+          log(`DEV OK: create+use => ${currentEmail}`);
+          await syncPromoAvailability();
+        }
+      });
+
+      el("btnPing").addEventListener("click", async () => {
+        await request("GET", "/plans");
+      });
+
+      el("btnRefreshAll").addEventListener("click", async () => {
+        await refreshAll();
+      });
+
+      el("btnLoadPlans").addEventListener("click", async () => {
+        await loadPlans();
+      });
+
+      // PROMO button behavior
+      el("btnPromoToggle").addEventListener("click", async () => {
+        // перед открытием — еще раз уточним trial (чтобы точно блокировать)
+        await syncPromoAvailability();
+        if (el("btnPromoToggle").disabled) return;
+
+        const box = el("promoBox");
+        box.style.display = box.style.display === "none" ? "block" : "none";
+        if (box.style.display === "block") {
+          el("promoHint").textContent = "Введите что угодно и нажмите «Применить».";
+        }
+      });
+
+      // "Скрыть" — закрывает окно (Promo не показываем, пока не нажмут "Применить" снова)
+      el("btnPromoHide").addEventListener("click", () => {
+        el("promoBox").style.display = "none";
+      });
+
+      el("btnApplyPromo").addEventListener("click", async () => {
+        // если вдруг trial стал true — убираем промо
+        await syncPromoAvailability();
+        if (el("btnPromoToggle").disabled) return;
+
+        const code = (el("promoInput").value || "").trim();
+        if (!code) {
+          el("promoHint").textContent = "Введите промокод (любой текст).";
+          return;
+        }
+
+        // Появляется тариф Promo (и только теперь показываем его в списке)
+        injectPromoPlanIfNeeded();
+        renderPlans(cachedPlans);
+        el("promoHint").textContent = `OK: промокод принят (${code}). Появился тариф Promo.`;
+        log(`OK: введён промокод: ${code} → показан тариф Promo`);
+      });
+
+      el("btnCreatePlan").addEventListener("click", async () => {
+        const payload = {
+          name: el("planName").value.trim(),
+          price_cents: Number(el("planPrice").value),
+          period: el("planPeriod").value,
+          trial_days: Number(el("planTrial").value),
+        };
+        await request("POST", "/admin/plans", { asAdmin: true, body: payload });
+        await loadPlans();
+      });
+
+      el("btnLoadBalance").addEventListener("click", async () => {
+        await loadBalance();
+      });
+
+      el("btnTopup").addEventListener("click", async () => {
+        const amount = Number(el("topupAmount").value || "0");
+        const key = (el("topupKey").value || "").trim() || randKey("topup");
+
+        if (!amount || amount <= 0) return log("Введите сумму (cents) > 0");
+
+        const payload = { amount_cents: amount, idempotency_key: key };
+        const r = await request("POST", "/balance/topup", { body: payload });
+
+        if (r.status >= 200 && r.status < 300) {
+          setBalanceLabel(r.data);
+          await loadBalanceEntries();
+          log("OK: баланс пополнен.");
+        } else {
+          log("Ошибка: не удалось пополнить баланс.");
+        }
+      });
+
+      el("btnLoadPM").addEventListener("click", async () => {
+        await loadPM();
+      });
+
+      el("btnPMAdd").addEventListener("click", async () => {
+        const payload = {
+          provider: el("pmProvider").value.trim(),
+          token_ref: el("pmToken").value.trim(),
+          is_default: el("pmDefault").value === "true",
+        };
+        await request("POST", "/payment-methods", { body: payload });
+        await loadPM();
+      });
+
+      el("btnPMMakeDefault").addEventListener("click", async () => {
+        const pmId = el("pmIdDefault").value.trim();
+        if (!pmId) return log("Введите id метода оплаты");
+        await request("POST", `/payment-methods/${encodeURIComponent(pmId)}/make-default`);
+        await loadPM();
+      });
+
+      el("btnLoadSubs").addEventListener("click", async () => {
+        await loadSubs();
+      });
+
+      el("btnSubscribe").addEventListener("click", async () => {
+        const planId = el("selectedPlanId").value.trim();
+        if (!planId) return log("Выбери тариф (plan_id)");
+
+        const mode = getPayMode();
+        log(`Способ оплаты: ${mode === "balance" ? "Баланс" : "Карта (привязанная)"}`);
+
+        if (mode === "balance") {
+          if (!cachedPlans.length) await loadPlans();
+          const plan = cachedPlans.find((p) => String(p.id) === String(planId));
+          if (!plan) log("WARN: не нашёл тариф в кеше, продолжу без проверки цены.");
+
+          const br = await request("GET", "/balance");
+          if (br.status >= 200 && br.status < 300) setBalanceLabel(br.data);
+
+          const bal = br.data?.balance_cents ?? 0;
+          const price = plan?.price_cents;
+
+          if (typeof price === "number") {
+            if (bal < price) {
+              log(`❌ Недостаточно средств на балансе: нужно ${price}, доступно ${bal}.`);
+              log("Выбери 'Оплатить картой' или пополни баланс.");
+              return;
+            }
+          } else {
+            log("WARN: цена тарифа неизвестна — пропускаю проверку баланса.");
+          }
+        }
+
+        const payload = { plan_id: planId, pay_mode: mode };
+
+        const r = await request("POST", "/subscriptions", { body: payload });
+
+        await loadSubs();
+        await loadBalance();
+        await loadBalanceEntries();
+
+        if (r.status >= 200 && r.status < 300) {
+          await sendDueNotificationsDev(200);
+          log("OK: подписка оформлена, уведомления отправлены.");
+        } else {
+          if (r.data?.detail) log(`Ошибка: ${r.data.detail}`);
+          else log("Ошибка: подписка не оформлена.");
+        }
+      });
+
+      el("btnCancelSub").addEventListener("click", async () => {
+        const subId = el("subCancelId").value.trim();
+        if (!subId) return log("Введите sub_id");
+
+        const r = await request("POST", `/subscriptions/${encodeURIComponent(subId)}/cancel`);
+        await loadSubs();
+
+        if (r.status >= 200 && r.status < 300) {
+          await sendDueNotificationsDev(200);
+          log("OK: подписка отменена, уведомления отправлены.");
+        } else {
+          log("Ошибка: отмена не прошла.");
+        }
+      });
+
+      el("btnExplainRenewal").addEventListener("click", () => {
+        if (!cachedSubs || !cachedSubs.length) {
+          log("Нет подписок в кеше. Нажми 'Показать мои подписки'.");
+          return;
+        }
+
+        const first = cachedSubs[0];
+        const status = first.status ?? first.state ?? "(?)";
+        const currentPeriodEnd = fmtDateMaybe(first.current_period_end ?? first.period_end ?? first.currentPeriodEnd);
+
+        log("=== Автопродление ===");
+        log(`Статус: ${status}`);
+        log(`Конец текущего периода: ${currentPeriodEnd ?? "(нет поля)"}`);
+        log("Продление происходит, когда current_period_end <= now.");
+        log("Выбранный режим оплаты влияет только если backend поддерживает pay_mode:");
+        log("- Баланс: списываем с баланса; если не хватает — ошибка 'Недостаточно средств'");
+        log("- Карта: списываем через gateway по основному методу оплаты");
+        log("=====================");
+      });
+
+      el("btnRunBilling").addEventListener("click", async () => {
+        const limit = Number(el("adminLimit").value || "50");
+
+        await request("POST", `/admin/billing/run-due?limit=${encodeURIComponent(limit)}`, { asAdmin: true });
+        await request("POST", `/admin/notifications/send-due?limit=${encodeURIComponent(limit)}`, { asAdmin: true });
+
+        await loadSubs();
+        await loadBalance();
+        await loadBalanceEntries();
+
+        log("OK: billing run-due → notifications send-due → обновлено.");
+      });
+
+      el("btnSimulateRenewalV2").addEventListener("click", async () => {
+        const subId = el("subCancelId").value.trim();
+        if (!subId) return log("Введите sub_id");
+
+        log("FORCE DUE: делаю подписку к оплате и запускаю биллинг...");
+
+        await request("POST", `/admin/subscriptions/${encodeURIComponent(subId)}/simulate-renewal`, { asAdmin: true });
+
+        await loadSubs();
+        await loadBalance();
+        await loadBalanceEntries();
+
+        log("Готово: simulate-renewal → обновил подписки/баланс.");
+      });
+
+      // Инициализация: сразу проверим trial-флаг и активируем/скроем промо (даже до загрузки планов)
+      (async function initPromo() {
+        const onTrial = await fetchTrialFlag();
+        if (onTrial) {
+          setPromoUI({ enabled: false, reason: "Промокод недоступен: у пользователя активен trial." });
+        } else {
+          setPromoUI({ enabled: true, reason: "Можно ввести промокод, чтобы увидеть тариф Promo." });
+        }
+      })();
+
+      log("Сценарий (баланс или карта):");
+      log("1) DEV: создать пользователя (если нужно)");
+      log("2) Если оплата с баланса — пополни баланс");
+      log("3) Если оплата картой — привяжи карту и сделай её основной");
+      log("4) Выбери тариф → оформи подписку");
+      log("--------------------------------------------------");
+
+      // ---------------------------
+      // UX ДОБАВКИ (не ломают логику)
+      // ---------------------------
+
+      // Очистка лога
+      const clearBtn = document.getElementById("btnClearLog");
+      if (clearBtn) {
+        clearBtn.addEventListener("click", () => {
+          out.textContent = "";
+        });
+      }
+
+      // Copy-to-clipboard для элементов с data-copy="#selector"
+      document.querySelectorAll("[data-copy]").forEach((b) => {
+        b.addEventListener("click", async () => {
+          const sel = b.getAttribute("data-copy");
+          const target = document.querySelector(sel);
+          if (!target) return;
+          const val = (target.value ?? target.textContent ?? "").toString();
+          try {
+            await navigator.clipboard.writeText(val);
+            log(`OK: скопировано: ${val.slice(0, 120)}`);
+          } catch {
+            log("WARN: не удалось скопировать (clipboard запрещён браузером).");
+          }
+        });
+      });
+
+      // Loading wrapper для частых кнопок (предотвращает двойные клики)
+      async function withLoading(btn, fn) {
+        const old = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "…";
+        try {
+          return await fn();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = old;
+        }
+      }
+
+      // Ничего не ломаем: просто добавим дополнительную защиту от многоклика на эти кнопки через capturing
+      ["btnRefreshAll", "btnLoadPlans", "btnLoadSubs", "btnRunBilling", "btnSubscribe"].forEach((id) => {
+        const b = el(id);
+        if (!b) return;
+        b.addEventListener(
+          "click",
+          async (e) => {
+            // если уже disabled — блокируем повтор
+            if (b.disabled) {
+              e.preventDefault();
+              e.stopPropagation();
+              return;
+            }
+            // на первый клик — временно дизейблим, потом вернём
+            const old = b.textContent;
+            b.disabled = true;
+            b.textContent = "…";
+            setTimeout(() => {
+              b.disabled = false;
+              b.textContent = old;
+            }, 1200);
+          },
+          true
+        ); // capturing: сработает раньше твоего обработчика
+      });
+    </script>
+  </body>
+</html>
